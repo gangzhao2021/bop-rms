@@ -1,3 +1,7 @@
+import { exerciseOptionSetPublicationResolution } from "../test-support/option-set-publication-resolution.mjs";
+import { exerciseOptionSetAuthoringResolution } from "../test-support/option-set-authoring-resolution.mjs";
+import { exerciseOptionSetAuthoringRuntimeHttp } from "../test-support/option-set-authoring-runtime-http.mjs";
+import { exerciseOptionSetFullEdit } from "../test-support/option-set-full-edit.mjs";
 import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -5,6 +9,7 @@ import pg from "pg";
 import { it } from "vitest";
 
 import { withIsolatedDatabase } from "../test-support/isolated-database.mjs";
+import { exerciseOptionSetReviewRelease } from "../test-support/option-set-review-release.mjs";
 
 const { Client } = pg;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -104,12 +109,20 @@ async function prove(context) {
       /product_option_binding_purpose_unique/u,
     );
 
+    // The new owning operation trigger requires explicit scope even for this
+    // isolated legacy admin fixture. LOCAL settings clear before the RLS probe.
+    await admin.query("BEGIN");
+    await admin.query(
+      "SELECT set_config('bop.tenant_id',$1,true),set_config('bop.brand_id',$2,true),set_config('bop.store_id','',true)",
+      [id(80), id(2)],
+    );
     await admin.query(
       `INSERT INTO rms_catalog.option_set_operation_record
        (operation_id,brand_id,option_set_id,action_code,intent_digest,result_aggregate_version,occurred_at)
        VALUES ($1,$2,$3,'Create',$4,1,$5)`,
       [id(20), id(2), id(1), `sha256:${"b".repeat(64)}`, at],
     );
+    await admin.query("COMMIT");
     await admin.query(
       `UPDATE rms_catalog.option_set_operation_record SET result_aggregate_version=2 WHERE operation_id=$1`,
       [id(20)],
@@ -149,4 +162,57 @@ async function prove(context) {
 
 it("enforces Option Set, Option and Product Binding persistence boundaries", async () => {
   await withIsolatedDatabase({ caseId: "option_set", root }, prove);
+}, 120_000);
+
+it("records actual Option Set reviewed content and Publishing-linked sealed release atomically", async () => {
+  await withIsolatedDatabase({ caseId: "option_review", root }, exerciseOptionSetReviewRelease);
+}, 120_000);
+
+it("persists a near-one-MiB actual Draft through its bounded Frozen envelope and Publishing-linked release", async () => {
+  await withIsolatedDatabase({ caseId: "option_near_limit", root }, (context) =>
+    exerciseOptionSetReviewRelease(context, { nearLimit: true }),
+  );
+}, 120_000);
+
+it("persists ordinary Option Edit server identities and Archive history with exact replay and late rollback", async () => {
+  await withIsolatedDatabase({ caseId: "option_full_edit", root }, exerciseOptionSetFullEdit);
+});
+
+it("resolves actual Option authoring originals and permanently fences absence under real operation contention", async () => {
+  await withIsolatedDatabase(
+    { caseId: "option_authoring", root },
+    exerciseOptionSetAuthoringResolution,
+  );
+}, 120_000);
+
+it("composes real Option authoring HTTP with encrypted Session, current IAM and Feature admission", async () => {
+  await withIsolatedDatabase(
+    { caseId: "option_http", root },
+    exerciseOptionSetAuthoringRuntimeHttp,
+  );
+}, 120_000);
+
+it("resolves genuine Option publication terminals and fences absent originals under real contention", async () => {
+  await withIsolatedDatabase(
+    { caseId: "option_pub_resolve", root },
+    exerciseOptionSetPublicationResolution,
+  );
+}, 120_000);
+
+// Independent whole Product publication journey; the old authoring/history case
+// retains its default profile and all original assertions.
+// This two-publication journey has a case-only 180s runner budget. The ordinary
+// request's five-second lease and every existing case/config budget are unchanged.
+it("composes real Product CurrentPublished Option publication with encrypted Session, current IAM and independent approval", async () => {
+  await withIsolatedDatabase({ caseId: "product_option_pub", root }, (context) =>
+    exerciseOptionSetAuthoringRuntimeHttp(context, {
+      workflow: "ProductCurrentPublishedPublication",
+    }),
+  );
+}, 180_000);
+
+it("composes ordinary Option Price publication with encrypted Session, current IAM and independent approval", async () => {
+  await withIsolatedDatabase({ caseId: "option_price_http", root }, (context) =>
+    exerciseOptionSetAuthoringRuntimeHttp(context, { workflow: "OptionPricePublication" }),
+  );
 }, 120_000);

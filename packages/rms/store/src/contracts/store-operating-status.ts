@@ -423,7 +423,7 @@ function validateExceptionCrossDayOverlap(
   }
 }
 
-function parseTemporaryClosures(value: unknown): readonly StoreTemporaryClosure[] {
+export function parseStoreTemporaryClosures(value: unknown): readonly StoreTemporaryClosure[] {
   const input = readExactArray(value, 0, 100, "STORE_OPERATING_CONFIGURATION_INVALID");
   const closures = input.map((item) => {
     const closure = readExactRecord(
@@ -529,6 +529,24 @@ export function parseStoreOperatingStatusResolutionEvidence(
   }
 }
 
+/** Content validation shared by authorized Store readers; grants no read authority. */
+export function parseStoreOperatingContent(value: unknown) {
+  const input = readExactRecord(
+    value,
+    ["timeZone", "weeklySchedule", "exceptions", "temporaryClosures"],
+    "STORE_OPERATING_CONFIGURATION_INVALID",
+  );
+  const weeklySchedule = parseWeeklySchedule(input.weeklySchedule);
+  const exceptions = parseExceptions(input.exceptions);
+  validateExceptionCrossDayOverlap(weeklySchedule, exceptions);
+  return Object.freeze({
+    timeZone: parseTimeZone(input.timeZone),
+    weeklySchedule,
+    exceptions,
+    temporaryClosures: parseStoreTemporaryClosures(input.temporaryClosures),
+  });
+}
+
 export function parseStoreOperatingConfigurationCandidateShape(
   value: unknown,
 ): StoreOperatingConfigurationCandidate {
@@ -567,9 +585,12 @@ export function parseStoreOperatingConfigurationCandidateShape(
   } catch {
     return fail("STORE_OPERATING_CONFIGURATION_INVALID");
   }
-  const weeklySchedule = parseWeeklySchedule(input.weeklySchedule);
-  const exceptions = parseExceptions(input.exceptions);
-  validateExceptionCrossDayOverlap(weeklySchedule, exceptions);
+  const content = parseStoreOperatingContent({
+    timeZone: input.timeZone,
+    weeklySchedule: input.weeklySchedule,
+    exceptions: input.exceptions,
+    temporaryClosures: input.temporaryClosures,
+  });
   return Object.freeze({
     configurationReference: parseUuid<StoreOperatingConfigurationReference>(
       input.configurationReference,
@@ -579,10 +600,7 @@ export function parseStoreOperatingConfigurationCandidateShape(
     brandReference,
     storeReference,
     classification: "Public",
-    timeZone: parseTimeZone(input.timeZone),
-    weeklySchedule,
-    exceptions,
-    temporaryClosures: parseTemporaryClosures(input.temporaryClosures),
+    ...content,
     contentDigest: input.contentDigest as StoreOperatingContentDigest,
     publishingLifecycle: input.publishingLifecycle as PublishingLifecycleRecord,
     publishingRelease: input.publishingRelease as PublishingReleaseRecord,

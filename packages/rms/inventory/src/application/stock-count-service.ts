@@ -18,9 +18,11 @@ import {
   cancelStockCount,
   createStockCount,
   decideStockCount,
+  explainStockCountVariance,
   markStockCountPosted,
   parseStockCountQuantity,
   saveStockCountLine,
+  refreshStockCountLines,
   startStockCount,
   StockCountError,
   submitStockCount,
@@ -47,6 +49,8 @@ const actions: readonly StockCountAction[] = [
   "Reject",
   "Cancel",
   "Post",
+  "ExplainVariance",
+  "Refresh",
 ];
 const permissions: Record<StockCountAction, StockCountPermission> = {
   Create: "inventory.count.manage",
@@ -57,7 +61,10 @@ const permissions: Record<StockCountAction, StockCountPermission> = {
   Approve: "inventory.count.approve",
   Reject: "inventory.count.approve",
   Cancel: "inventory.count.manage",
-  Post: "inventory.count.post",
+  // DEC-INV-STOCK-COUNT: the approver posts the approved variances; the catalog has no separate post action.
+  Post: "inventory.count.approve",
+  ExplainVariance: "inventory.count.approve",
+  Refresh: "inventory.count.execute",
 };
 const hashPattern = /^sha256:[0-9a-f]{64}$/u;
 const reasonPattern = /^[A-Z][A-Z0-9_]{0,63}$/u;
@@ -177,6 +184,8 @@ function parsePayload(action: StockCountAction, value: unknown): Readonly<Record
     Reject: ["countReference", "expectedVersion", "reasonCode"],
     Cancel: ["countReference", "expectedVersion", "reasonCode"],
     Post: ["countReference", "expectedVersion"],
+    ExplainVariance: ["countReference", "expectedVersion", "lineReference", "varianceReasonCode"],
+    Refresh: ["countReference", "expectedVersion"],
   };
   const raw = exact(value, fields[action]);
   if (action === "Create") {
@@ -200,6 +209,10 @@ function parsePayload(action: StockCountAction, value: unknown): Readonly<Record
     if (raw.varianceReasonCode !== null) reason(raw.varianceReasonCode);
   }
   if (["Approve", "Reject", "Cancel"].includes(action)) reason(raw.reasonCode);
+  if (action === "ExplainVariance") {
+    reference(raw.lineReference);
+    reason(raw.varianceReasonCode);
+  }
   return Object.freeze(raw);
 }
 
@@ -534,6 +547,67 @@ async function apply(
       actorReference: command.actorReference,
       occurredAt: command.occurredAt,
     });
+  if (command.action === "ExplainVariance")
+    return explainStockCountVariance(before, {
+      lineReference: payload.lineReference,
+      varianceReasonCode: payload.varianceReasonCode,
+      expectedVersion,
+      actorReference: command.actorReference,
+      occurredAt: command.occurredAt,
+    });
+  if (command.action === "Refresh") {
+    // Current ledger state of the count's scope; lines whose account moved since their snapshot are
+    // refreshed for recounting.
+    const current = await ports.snapshot.capture(command);
+    const raw = exact(current, ["snapshotReference", "capturedAt", "stockScope", "lines"]);
+    const scope = stockScope(raw.stockScope);
+    if (
+      scope.scopeType !== before.stockScope.scopeType ||
+      scope.scopeReference !== before.stockScope.scopeReference ||
+      !Array.isArray(raw.lines)
+    )
+      return fail("STOCK_COUNT_DEPENDENCY_UNAVAILABLE");
+    const byCoordinate = new Map<string, { expectedQuantity: string; balanceVersion: number }>();
+    for (const value of raw.lines) {
+      const line = exact(value, [
+        "lineReference",
+        "itemReference",
+        "lotReference",
+        "locationReference",
+        "unitCode",
+        "expectedQuantity",
+        "balanceVersion",
+      ]);
+      byCoordinate.set(
+        `${reference(line.itemReference)}:${nullableReference(line.lotReference) ?? "none"}:${reference(line.locationReference)}`,
+        {
+          expectedQuantity: parseStockCountQuantity(line.expectedQuantity),
+          balanceVersion: version(line.balanceVersion),
+        },
+      );
+    }
+    const changed = new Map<
+      InventoryReference,
+      { expectedQuantity: ReturnType<typeof parseStockCountQuantity>; balanceVersion: number }
+    >();
+    for (const line of before.lines) {
+      const now = byCoordinate.get(
+        `${line.itemReference}:${line.lotReference ?? "none"}:${line.locationReference}`,
+      ) ?? { expectedQuantity: parseStockCountQuantity("0"), balanceVersion: line.balanceVersion };
+      if (now.balanceVersion !== line.balanceVersion)
+        changed.set(line.lineReference, {
+          expectedQuantity: parseStockCountQuantity(now.expectedQuantity),
+          balanceVersion: now.balanceVersion,
+        });
+    }
+    if (changed.size === 0) return fail("STOCK_COUNT_STATE_CONFLICT");
+    return refreshStockCountLines(before, {
+      lines: changed,
+      expectedVersion,
+      actorReference: command.actorReference,
+      occurredAt: command.occurredAt,
+    });
+  }
   if (command.action === "Cancel")
     return cancelStockCount(before, {
       reasonCode: reason(payload.reasonCode),

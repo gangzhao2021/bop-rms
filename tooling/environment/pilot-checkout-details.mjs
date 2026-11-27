@@ -1,0 +1,65 @@
+import {
+  createCustomerPickupCheckoutDetailsComposition,
+  createCustomerDiningCheckoutDetailsComposition,
+} from "../../apps/api/dist/customer-checkout-details-composition.js";
+import { createPostgresGuestSessionEntryStore } from "../../packages/bop/identity/src/index.ts";
+import { createStorePrivacyNoticeReader } from "../../apps/api/dist/store-receipt-details-source.js";
+export function createInternalCheckoutDetails(resources, entry, diningIdentity) {
+  const { scope, transactions, now, credentials } = resources;
+  const common = {
+    scope,
+    quoteVersion: 2,
+    cartTransactions: transactions,
+    detailsTransactions: transactions,
+    now,
+    // Explicit InternalTest policy only; real Store legal documents remain an external gate.
+    policies: {
+      current: async (input) => ({
+        brandReference: input.brandReference,
+        storeReference: input.storeReference,
+        orderType: input.orderType,
+        checkedAt: input.observedAt,
+        validUntil: resources.publicProfile.binding.validUntil,
+        required: [],
+      }),
+    },
+    // WP-2423 Q16: the Store's privacy notice link next to the contact fields (none until entered).
+    privacyNotice: createStorePrivacyNoticeReader({ scope, transactions }),
+    audit: async (input) => ({
+      auditId: credentials.reference(),
+      brandId: scope.brandReference,
+      storeId: scope.storeReference,
+      actor: { type: "System" },
+      actionCode: "ORDERING_CHECKOUT_DETAILS_SAVE",
+      reasonCode: "AUTHORIZED_CHECKOUT_UPDATE",
+      targetType: "CheckoutDetails",
+      targetId: input.detailsReference,
+      occurredAt: input.observedAt,
+      correlationId: input.operationReference,
+      sourceChannel: "CUSTOMER_PWA",
+      dataClassification: "Restricted",
+      retentionPolicyCode: "AUDIT_DEFAULT",
+      retentionPolicyVersion: 1,
+    }),
+  };
+  const pickup = {
+    quoteVersion: 2,
+    ...createCustomerPickupCheckoutDetailsComposition({
+      ...common,
+      session: {
+        ...entry.session,
+        store: createPostgresGuestSessionEntryStore(transactions, scope),
+      },
+    }),
+  };
+  if (!diningIdentity) return { checkoutDetails: pickup };
+  return {
+    channelCheckoutDetails: {
+      pickup,
+      dining: {
+        quoteVersion: 2,
+        ...createCustomerDiningCheckoutDetailsComposition({ ...common, identity: diningIdentity }),
+      },
+    },
+  };
+}

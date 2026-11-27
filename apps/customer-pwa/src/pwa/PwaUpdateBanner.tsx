@@ -1,3 +1,4 @@
+import { t, wordGap } from "../i18n/i18n.js";
 import { useSyncExternalStore } from "react";
 import { Link, useLocation } from "react-router";
 import { isSafeUpdatePath } from "./service-worker-policy.js";
@@ -13,21 +14,24 @@ export function PwaUpdateBanner({ store = pwaUpdateStore }: { readonly store?: P
       <div>
         <strong>
           {state.status === "applying"
-            ? "Applying application update."
-            : "Application update ready."}
-        </strong>{" "}
+            ? t("Applying application update.")
+            : t("Application update ready.")}
+        </strong>
+        {wordGap()}
         <span>
           {safe
-            ? "This route is safe for an explicit update."
-            : "Finish or leave this sensitive flow before updating."}
+            ? t("This route is safe for an explicit update.")
+            : t("Finish or leave this sensitive flow before updating.")}
         </span>
       </div>
       {state.status === "waiting" && safe ? (
         <button type="button" onClick={() => void store.activate(location.pathname)}>
-          Update now
+          {t("Update now")}
         </button>
       ) : null}
-      {state.status === "waiting" && !safe ? <Link to="/menu">Go to a safe menu route</Link> : null}
+      {state.status === "waiting" && !safe ? (
+        <Link to="/menu">{t("Go to a safe menu route")}</Link>
+      ) : null}
     </aside>
   );
 }

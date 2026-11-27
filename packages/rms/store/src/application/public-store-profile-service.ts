@@ -47,7 +47,7 @@ function sameScope(
     readonly brandReference: string;
     readonly storeReference: string | null;
   },
-  evidence: PublicStoreResolutionEvidence,
+  evidence: Pick<PublicStoreResolutionEvidence, "brandReference" | "storeReference">,
 ): boolean {
   return (
     scope.kind === "Store" &&
@@ -82,9 +82,9 @@ function validatePublishing(
     throw new StoreContractError("STORE_PROFILE_INVALID");
 }
 
-function validateEffectivePeriod(
+export function validatePublicStoreProfileEffectiveBinding(
   candidate: PublicStoreProfileCandidate,
-  evidence: PublicStoreResolutionEvidence,
+  evidence: Pick<PublicStoreResolutionEvidence, "brandReference" | "storeReference">,
   evaluatedAt: CanonicalInstant,
 ): PublicStoreProfileCandidate {
   const effectiveVersion = createEffectiveConfigurationVersion(candidate.effectiveVersion);
@@ -158,7 +158,11 @@ function resolveProfile(input: {
     )
       throw new StoreContractError("STORE_PROFILE_INVALID");
     validatePublishing(candidate, input.evidence, input.evaluatedAt);
-    const validated = validateEffectivePeriod(candidate, input.evidence, input.evaluatedAt);
+    const validated = validatePublicStoreProfileEffectiveBinding(
+      candidate,
+      input.evidence,
+      input.evaluatedAt,
+    );
     return Object.freeze({
       candidate: validated,
       logoAssetVersionReference: validateLogo(validated.logo, validated, input.evidence),

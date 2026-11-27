@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { createQrTableContextService, type QrTableContextPorts } from "../index.js";
+import {
+  assertCurrentDiningGuestTableContext,
+  createQrTableContextService,
+  type QrTableContextPorts,
+} from "../index.js";
 
 const ids = {
   qr: "00000000-0000-7000-8000-000000000201",
@@ -301,5 +305,67 @@ describe("WP-1002 QR Token / Table Context Resolution", () => {
       createQrTableContextService(ports).resolveQrTableContext(request),
     ).resolves.toMatchObject({ status: "Verified" });
     expect(record).toHaveBeenCalledOnce();
+  });
+});
+
+describe("WP-2298 current authenticated Guest table context", () => {
+  const expected = () => ({
+    brandReference: ids.brand,
+    storeReference: ids.store,
+    publicStoreReference: ids.publicStore,
+    publicTableReference: ids.publicTable,
+    channel: "DineIn",
+    qrRevocationVersion: 3,
+    observedAt: request.evaluatedAt,
+  });
+  it("preserves distinct public/internal IDs and finite owner validity", () => {
+    const result = assertCurrentDiningGuestTableContext(expected(), context());
+    expect(result.tableReference).toBe(ids.table);
+    expect(result.publicTableReference).toBe(ids.publicTable);
+    expect(Object.isFrozen(result)).toBe(true);
+  });
+  it.each([
+    ["brandReference", ids.qr],
+    ["storeReference", ids.qr],
+    ["publicStoreReference", ids.qr],
+    ["publicTableReference", ids.qr],
+    ["channel", "Pickup"],
+    ["revocationVersion", 4],
+    ["brandLifecycle", "Suspended"],
+    ["storeLifecycle", "Suspended"],
+    ["tableLifecycle", "Suspended"],
+    ["assignmentState", "Inactive"],
+    ["qrState", "Revoked"],
+    ["validUntil", request.evaluatedAt],
+    ["tableReference", null],
+  ])("rejects unavailable or mismatched %s", (field, value) => {
+    expect(() =>
+      assertCurrentDiningGuestTableContext(expected(), { ...context(), [field]: value }),
+    ).toThrow("qr table context contract is invalid");
+  });
+  it.each([
+    "brandReference",
+    "storeReference",
+    "publicStoreReference",
+    "publicTableReference",
+    "channel",
+    "qrRevocationVersion",
+    "observedAt",
+  ])("closes and validates expected %s", (field) => {
+    expect(() =>
+      assertCurrentDiningGuestTableContext({ ...expected(), [field]: "invalid" }, context()),
+    ).toThrow("qr table context contract is invalid");
+    const getter = vi.fn(() => "invalid");
+    expect(() =>
+      assertCurrentDiningGuestTableContext(
+        Object.defineProperty(expected(), field, { enumerable: true, get: getter }),
+        context(),
+      ),
+    ).toThrow();
+    expect(getter).not.toHaveBeenCalled();
+  });
+  it("rejects extra or inherited authority fields", () => {
+    for (const input of [{ ...expected(), purpose: "invented" }, Object.create(expected())])
+      expect(() => assertCurrentDiningGuestTableContext(input, context())).toThrow();
   });
 });

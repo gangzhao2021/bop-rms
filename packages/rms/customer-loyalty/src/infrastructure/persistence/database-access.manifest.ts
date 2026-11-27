@@ -1,0 +1,82 @@
+// WP-2423 取舍 18 DEC-MEMBER-POINTS. `loyalty_member_contact` is the only table with a phone number.
+const databaseAccessManifestInput = {
+  version: 1,
+  module: { moduleName: "customer-loyalty", packageName: "@rms/customer-loyalty", layer: "RMS" },
+  tables: [
+    {
+      table: "loyalty_rule_version",
+      classification: "configuration-version",
+      writeOwner: { kind: "module", id: "@rms/customer-loyalty" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "transactional",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "loyalty_account",
+      classification: "aggregate-root",
+      writeOwner: { kind: "module", id: "@rms/customer-loyalty" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "financial-compliance",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "loyalty_points_transaction",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/customer-loyalty" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "financial-compliance",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "loyalty_member_contact",
+      classification: "aggregate-child-entity",
+      writeOwner: { kind: "module", id: "@rms/customer-loyalty" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "privacy-governance",
+      piiClassification: ["personal"],
+    },
+    {
+      table: "loyalty_marketing_consent",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/customer-loyalty" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "privacy-governance",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "loyalty_redemption",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/customer-loyalty" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "financial-compliance",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "loyalty_phone_challenge",
+      classification: "technical-control-record",
+      writeOwner: { kind: "module", id: "@rms/customer-loyalty" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "ephemeral-technical",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "loyalty_member_session",
+      classification: "technical-control-record",
+      writeOwner: { kind: "module", id: "@rms/customer-loyalty" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "ephemeral-technical",
+      piiClassification: ["indirect_identifier"],
+    },
+    {
+      table: "loyalty_expiry_notice",
+      classification: "append-only-record",
+      writeOwner: { kind: "module", id: "@rms/customer-loyalty" },
+      allowedReadPatterns: ["owner-repository"],
+      retentionCategory: "audit-security",
+      piiClassification: ["indirect_identifier"],
+    },
+  ],
+  accesses: [],
+} as const;
+
+export default databaseAccessManifestInput;

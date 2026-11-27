@@ -1,0 +1,375 @@
+import { wordGap } from "./word-gap.js";
+import { useRef, useState } from "react";
+import { t, saidTable } from "./i18n/i18n.js";
+import { newOperationReference } from "./operation-reference.js";
+import {
+  isStaffSignInEndedRefusal,
+  signedOutText,
+  useStaffSessionLive,
+} from "./staff-session-reads.js";
+import type { StaffDiningTable } from "./dining-session-client.js";
+import {
+  createTableTeaClient,
+  TablePartySizeError,
+  chargesPerHead,
+  teaNotConfirmed,
+  type TableTeaClient,
+  type TableTeaFailure,
+  type TableTeaView,
+} from "./TablePartySize.js";
+
+export type TableMergeProblem =
+  | "Denied"
+  | "Changed"
+  | "NotSeated"
+  | "PaysEachRound"
+  | "CheckingOut"
+  | "PaymentStarted"
+  | "TargetNotOrdered"
+  | "UnsentCart"
+  | "TooManyGuests"
+  /** Batch 64: this screen's sign-in had ended (401, or the tab's gate kept it back). */
+  | "SignedOut"
+  /** The request never left this device. */
+  | "Offline"
+  /** The system answered it is busy. */
+  | "Unavailable";
+export class TableMergeError extends Error {
+  constructor(readonly code: TableMergeProblem) {
+    super("table merge " + code);
+    this.name = "TableMergeError";
+  }
+}
+const problems: Readonly<Record<string, TableMergeProblem>> = {
+  table_merge_changed: "Changed",
+  table_merge_not_seated: "NotSeated",
+  table_merge_pays_each_round: "PaysEachRound",
+  table_merge_checking_out: "CheckingOut",
+  table_merge_payment_started: "PaymentStarted",
+  table_merge_target_not_ordered: "TargetNotOrdered",
+  table_merge_unsent_cart: "UnsentCart",
+  table_merge_too_many_guests: "TooManyGuests",
+};
+
+export interface TableMergeClient {
+  merge(
+    csrf: string,
+    command: {
+      readonly operationReference: string;
+      readonly tableReference: string;
+      readonly expectedTableVersion: number;
+      readonly targetTableReference: string;
+      readonly expectedTargetTableVersion: number;
+    },
+  ): Promise<{
+    readonly diningSessionReference: string;
+    readonly tableLabel: string;
+    readonly fromTableLabel: string;
+    /** b63 (T14): null unless both parties' sizes are known (the Store may not ask it). */
+    readonly partySize: number | null;
+    /** b63 review (T14): only one party was counted, so staff set the table's head count. */
+    readonly partySizeToSet: boolean;
+  }>;
+}
+
+export function createTableMergeClient(fetcher: typeof fetch = fetch): TableMergeClient {
+  const client: TableMergeClient = {
+    async merge(csrf, command) {
+      let response: Response;
+      try {
+        response = await fetcher("/merchant/dining/table-merge", {
+          method: "POST",
+          credentials: "same-origin",
+          cache: "no-store",
+          redirect: "error",
+          headers: { "content-type": "application/json", "x-bop-csrf": csrf },
+          body: JSON.stringify({ action: "Merge", ...command }),
+        });
+      } catch (error) {
+        throw new TableMergeError(isStaffSignInEndedRefusal(error) ? "SignedOut" : "Offline");
+      }
+      if (response.status === 401) throw new TableMergeError("SignedOut");
+      if (response.status === 403) throw new TableMergeError("Denied");
+      const payload = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+      if (response.status === 409)
+        throw new TableMergeError(problems[String(payload?.error)] ?? "Changed");
+      if (
+        !response.ok ||
+        payload === null ||
+        typeof payload.diningSessionReference !== "string" ||
+        typeof payload.tableLabel !== "string" ||
+        typeof payload.fromTableLabel !== "string" ||
+        (typeof payload.partySize !== "number" && payload.partySize !== null) ||
+        typeof payload.partySizeToSet !== "boolean"
+      )
+        throw new TableMergeError("Unavailable");
+      return {
+        diningSessionReference: payload.diningSessionReference,
+        tableLabel: payload.tableLabel,
+        fromTableLabel: payload.fromTableLabel,
+        partySize: payload.partySize,
+        partySizeToSet: payload.partySizeToSet,
+      };
+    },
+  };
+  return Object.freeze(client);
+}
+
+/** Why this table can't be merged into another now, in staff words (null: it can). */
+export function mergeSourceProblem(table: StaffDiningTable): string | null {
+  if (table.paymentTiming !== "PayLater") return t("this table pays for each round");
+  if (table.session?.phase === "Closing") return t("this table is checking out");
+  if (table.session?.paymentStarted === true)
+    return t("something on this table's bill was paid or split");
+  return null;
+}
+
+/** Why the party can't be merged into another table, in staff words (null: it can). */
+export function mergeTargetProblem(
+  table: StaffDiningTable,
+  other: StaffDiningTable,
+  /** b63 (F32): the other table's bill is paid in full (as its list row reads it). */
+  otherPaid = false,
+): string | null {
+  const session = other.session;
+  if (other.currentDiningSessionReference === null || session === null || session === undefined)
+    return t("no party");
+  if (other.paymentTiming !== "PayLater") return t("pays for each round");
+  // b63 (F32): a paid table is said as its row says it, never "checking out" (money to collect).
+  if (session.phase === "Closing") return otherPaid ? t("paid") : t("checking out");
+  if (session.paymentStarted === true) return t("paid or split already");
+  if (table.session?.orderReference != null && session.orderReference === null)
+    return t("hasn't ordered yet (merge it into this table instead)");
+  return null;
+}
+
+/**
+ * WP-2423 item 8 ⑨ (DEC-DINING-TABLE-MERGE): merge the party at this table into the party seated
+ * at another — both pay at the end, still ordering, nothing paid or split. Its rounds, bill and
+ * guests join that table (the tea follows the guests); this table then waits for cleaning and its
+ * phones scan the other table's code. Each other table says why it can't be chosen. There is no
+ * un-merge: a table merged by mistake pays its own rounds with "Each pays own rounds".
+ */
+export function TableMerge({
+  table,
+  tables,
+  csrf,
+  locked,
+  onMerged,
+  onCheckingOut,
+  client: provided,
+  tea: providedTea,
+  paidTables,
+}: {
+  /** b63 (F32): the tables whose bill is paid in full, as the list rows read them. */
+  readonly paidTables?: ReadonlySet<string>;
+  readonly table: StaffDiningTable;
+  readonly tables: readonly StaffDiningTable[];
+  readonly csrf: string;
+  readonly locked: boolean;
+  /** After a merge: read the tables again (the guests are at the other table now). */
+  readonly onMerged: (message: string, targetReference: string | null) => void;
+  /**
+   * Batch 51 (v15 b50 live): checkout began on another device, at this table or the chosen one,
+   * after this screen loaded, and the merge was refused for it. The panel reads the tables again
+   * and says which table is paying in its outcome line, in view; without it the refusal is said
+   * here.
+   */
+  readonly onCheckingOut?: (targetReference: string) => void;
+  readonly client?: TableMergeClient;
+  readonly tea?: TableTeaClient;
+}) {
+  const [client] = useState(() => provided ?? createTableMergeClient());
+  const [tea] = useState(() => providedTea ?? createTableTeaClient());
+  const [target, setTarget] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  // Batch 64 (v15 b63 live): a 403 just after this screen was signed out (another sign-in took its
+  // place) is not the role's limit. While the signed-out cover is up, or for a 401, staff are told
+  // to sign in again, never that their role can't merge tables.
+  const [denied, setDenied] = useState(false);
+  const live = useStaffSessionLive();
+  // One reference per intended merge until it is answered (a retry is recorded once).
+  const operation = useRef<{ key: string; reference: string } | null>(null);
+  const blocked = mergeSourceProblem(table);
+  const others = tables
+    .filter(
+      (other) =>
+        other.tableReference !== table.tableReference &&
+        other.currentDiningSessionReference !== null,
+    )
+    .sort((a, b) => a.stableLabel.localeCompare(b.stableLabel, undefined, { numeric: true }));
+  // Batch 51: a table read again as unable to take the party (e.g. checking out) is no longer
+  // the choice: its option says why, and the button no longer names it.
+  const picked = others.find((other) => other.tableReference === target) ?? null;
+  const chosen = picked !== null && mergeTargetProblem(table, picked) === null ? picked : null;
+  const merge = async () => {
+    if (chosen === null || busy || locked || blocked !== null) return;
+    const key = `${table.aggregateVersion}:${chosen.tableReference}:${chosen.aggregateVersion}`;
+    if (operation.current?.key !== key)
+      operation.current = { key, reference: newOperationReference() };
+    setBusy(true);
+    setProblem(null);
+    setDenied(false);
+    try {
+      const merged = await client.merge(csrf, {
+        operationReference: operation.current.reference,
+        tableReference: table.tableReference,
+        expectedTableVersion: table.aggregateVersion,
+        targetTableReference: chosen.tableReference,
+        expectedTargetTableVersion: chosen.aggregateVersion,
+      });
+      operation.current = null;
+      // The tea follows the guests now at the table (the same sync as a party size change). It is
+      // money, so a merge is never announced as all done while it is not confirmed; the table the
+      // party joined opens with the way to match it, above its payment.
+      // Only a Store that charges per head hears about it: a failed sync is followed by a read, and
+      // said only when that read shows the charge (otherwise the table's own panel reads it again).
+      let followed: TableTeaView | null = null;
+      let failure: TableTeaFailure | null = null;
+      const failureOf = (error: unknown): TableTeaFailure =>
+        error instanceof TablePartySizeError && error.code === "Offline"
+          ? "Offline"
+          : "Unavailable";
+      try {
+        followed = await tea(csrf, {
+          action: "Sync",
+          diningSessionReference: merged.diningSessionReference,
+          operationReference: newOperationReference(),
+        });
+      } catch (error) {
+        failure = failureOf(error);
+        followed = await tea(csrf, {
+          action: "Read",
+          diningSessionReference: merged.diningSessionReference,
+        }).catch(() => null);
+      }
+      if (failure === null && followed?.status === "Mismatch") failure = "Unavailable";
+      if (!chargesPerHead(followed)) failure = null;
+      // b63 (T14, v15 D62DW): a Store that doesn't ask party size is never told a head count
+      // made of the default 1 per party.
+      const announced =
+        merged.partySize === null
+          ? t(
+              "Merged into table {table}. Phones from table {from} scan the code on table {table} to keep ordering; table {from} is marked for cleaning.",
+              { table: saidTable(merged.tableLabel), from: merged.fromTableLabel },
+            )
+          : t(
+              "Merged into table {table}: {count} guests. Phones from table {from} scan the code on table {table} to keep ordering; table {from} is marked for cleaning.",
+              {
+                table: saidTable(merged.tableLabel),
+                from: merged.fromTableLabel,
+                count: String(merged.partySize),
+              },
+            );
+      // b63 review (T14): one party was never counted, so the sum isn't known: staff set it.
+      const toSet = merged.partySizeToSet
+        ? announced +
+          wordGap() +
+          t(
+            "Only one of the two parties was counted: set how many guests are at table {table} under Manage this table.",
+            { table: saidTable(merged.tableLabel) },
+          )
+        : announced;
+      onMerged(
+        failure === null ? toSet : toSet + wordGap() + teaNotConfirmed(followed, failure),
+        chosen.tableReference,
+      );
+    } catch (error) {
+      const code = error instanceof TableMergeError ? error.code : "Unavailable";
+      if (code !== "Unavailable" && code !== "Offline") operation.current = null;
+      if (code === "CheckingOut" && onCheckingOut !== undefined) {
+        onCheckingOut(chosen.tableReference);
+        return;
+      }
+      setDenied(code === "Denied");
+      setProblem(
+        code === "SignedOut"
+          ? signedOutText()
+          : code === "PaymentStarted"
+            ? t("Something on one of the bills was paid or split. Those tables can't be merged.")
+            : code === "TargetNotOrdered"
+              ? t("That table hasn't ordered yet. Merge that table into this one instead.")
+              : code === "UnsentCart"
+                ? t(
+                    "This table's guests have dishes in their cart they haven't sent. Ask them to send or clear the cart first.",
+                  )
+                : code === "TooManyGuests"
+                  ? t("Together the parties would be more than 99 guests.")
+                  : code === "PaysEachRound"
+                    ? t("Only tables that pay at the end can be merged.")
+                    : code === "CheckingOut"
+                      ? t("One of the tables is checking out. Merge before checking out.")
+                      : code === "Denied"
+                        ? t("Your role can't merge tables. Ask the owner or a manager.")
+                        : code === "Changed" || code === "NotSeated"
+                          ? t("The tables changed meanwhile. They are read again: check and retry.")
+                          : code === "Offline"
+                            ? t("The merge wasn't confirmed: this device is offline. Retry.")
+                            : t("The merge wasn't confirmed: the system is busy. Retry."),
+      );
+      if (code === "Changed" || code === "NotSeated") onMerged("", null);
+    } finally {
+      setBusy(false);
+    }
+  };
+  // Batch 49 (v15 b48 live): a table checking out is said once in the panel ("…no one new can
+  // join…"); merging is not offered then, rather than said again as a reason here.
+  if (others.length === 0 || table.session?.phase === "Closing") return null;
+  return (
+    <section className="table-move" aria-label={t("Merge this party into another table")}>
+      {blocked !== null ? (
+        <p className="table-move__note">
+          {t("Merging isn't available: {reason}.", { reason: blocked })}
+        </p>
+      ) : (
+        <>
+          <label className="table-move__field">
+            <span>{t("Merge into…")}</span>
+            <select
+              value={chosen === null ? "" : target}
+              disabled={busy || locked}
+              onChange={(event) => {
+                setTarget(event.currentTarget.value);
+                setProblem(null);
+                setDenied(false);
+              }}
+            >
+              <option value="">{t("Choose a table")}</option>
+              {others.map((other) => {
+                const why = mergeTargetProblem(
+                  table,
+                  other,
+                  paidTables?.has(other.tableReference) === true,
+                );
+                return (
+                  <option
+                    key={other.tableReference}
+                    value={other.tableReference}
+                    disabled={why !== null}
+                  >
+                    {why === null
+                      ? other.stableLabel
+                      : t("{table} — {reason}", { table: other.stableLabel, reason: why })}
+                  </option>
+                );
+              })}
+            </select>
+          </label>
+          <button
+            type="button"
+            disabled={busy || locked || chosen === null}
+            onClick={() => void merge()}
+          >
+            {busy
+              ? t("Merging…")
+              : chosen === null
+                ? t("Merge")
+                : t("Merge into table {table}", { table: saidTable(chosen.stableLabel) })}
+          </button>
+        </>
+      )}
+      {problem ? <p role="alert">{denied && !live ? signedOutText() : problem}</p> : null}
+    </section>
+  );
+}

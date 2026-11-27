@@ -12,6 +12,7 @@ export interface PaymentIntentCreationPorts {
   };
   readonly killSwitch: PaymentKillSwitchPort;
   readonly authorization: {
+    /** Re-resolve current access on every call; observedAt is current server time, not original requestedAt. */
     authorize(input: {
       readonly action: "CreatePaymentIntent";
       readonly paymentOperationReference: string;
@@ -58,6 +59,15 @@ export interface PaymentIntentCreationPorts {
       paymentOperationReference: string,
     ): Promise<PaymentIntentCreationRecord | null>;
     claim(input: {
+      readonly record: PaymentIntentCreationRecord;
+      readonly audit: AppendAuditRecordInput;
+    }): Promise<{
+      readonly status: "Claimed" | "Existing";
+      readonly record: PaymentIntentCreationRecord;
+    }>;
+    /** WP-2423 Q20: append the next attempt after `previousAttemptReference` failed. */
+    claimRetry?(input: {
+      readonly previousAttemptReference: string;
       readonly record: PaymentIntentCreationRecord;
       readonly audit: AppendAuditRecordInput;
     }): Promise<{

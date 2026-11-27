@@ -1,0 +1,802 @@
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { StoreTimeZoneContext, storeWhen } from "./StoreTime.js";
+import { t } from "./i18n/i18n.js";
+import { isFullSignInRequired } from "./full-sign-in.js";
+import { FullSignInPrompt } from "./FullSignInPrompt.js";
+import { orderMoney } from "./order-money.js";
+import { serviceOperationReference } from "./service-control-client.js";
+import { dollarsToMinor } from "./TableCheckout.js";
+import { notConfirmedPressAgainText, offlineMayNotHaveGoneThroughText } from "./failure-words.js";
+import { browserOffline } from "./stale-read.js";
+
+const cad = (minor: string | bigint) =>
+  orderMoney({ amountMinor: String(minor), currencyCode: "CAD" });
+const minor = /^-?(?:0|[1-9][0-9]{0,18})$/u;
+/**
+ * v15 M131: cash goes back in whole nickels, rounded the Canadian way (1–2¢ down, 3–4¢ up); never
+ * above what is left of the cash taken (then down to the nickel below it).
+ */
+export function cashRefundNickel(amountMinor: bigint, leftMinor: bigint): bigint {
+  const rest = amountMinor % 5n;
+  const rounded = amountMinor - rest + (rest >= 3n ? 5n : 0n);
+  return rounded <= leftMinor ? rounded : leftMinor - (leftMinor % 5n);
+}
+
+export type CashRefundReason = "FOOD_ISSUE" | "CUSTOMER_REQUEST" | "OVERCHARGED" | "STORE_ERROR";
+export interface TablePayment {
+  /** The part of a split bill this payment is for (null: the whole table). */
+  readonly partNumber: number | null;
+  readonly method: "CardMachine" | "Cash" | "Online";
+  readonly roundsMinor: string;
+  readonly tipMinor: string;
+  readonly roundingMinor: string;
+  readonly totalMinor: string;
+  readonly takenAt: string;
+  readonly recordedAfterOutage: boolean;
+  readonly cashRefunds: readonly {
+    readonly amountMinor: string;
+    readonly reasonCode: CashRefundReason;
+    readonly refundedAt: string;
+    /** v15 M177: who gave it back (a name, "You", or their role; null when not known). */
+    readonly byLabel: string | null;
+  }[];
+  /** WP-2423 DEC-TABLE-ONLINE-REFUND: refunds made on the card machine. */
+  readonly cardRefunds: readonly {
+    readonly amountMinor: string;
+    readonly reasonCode: CashRefundReason;
+    readonly refundedAt: string;
+    readonly byLabel: string | null;
+  }[];
+  /** WP-2423 DEC-TABLE-ONLINE-REFUND: money going back to the guest's card. */
+  readonly onlineRefunds: readonly {
+    readonly amountMinor: string;
+    readonly reasonCode: CashRefundReason;
+    readonly requestedAt: string;
+    readonly byLabel: string | null;
+    readonly state: "Sending" | "Refunded" | "Refused";
+  }[];
+  readonly refundableMinor: string;
+  /** Absent from an older answer: offered, and the command still checks. */
+  readonly canRefund: boolean;
+}
+const reasons: readonly CashRefundReason[] = [
+  "FOOD_ISSUE",
+  "CUSTOMER_REQUEST",
+  "OVERCHARGED",
+  "STORE_ERROR",
+];
+/** A table refund's reason in staff words. */
+export const reasonText = (reason: CashRefundReason) =>
+  ({
+    FOOD_ISSUE: t("Problem with the food"),
+    CUSTOMER_REQUEST: t("Guest asked"),
+    OVERCHARGED: t("Charged too much"),
+    STORE_ERROR: t("Store mistake"),
+  })[reason];
+/**
+ * F27 reason: why a table's refund went back (its payment lists each one with its reason, at the
+ * same way, amount and time as the order's record). A pickup's or record-only refund has none.
+ */
+export interface RefundReason {
+  readonly method: "CardMachine" | "Cash" | "Online";
+  readonly amountMinor: string;
+  readonly at: string;
+  readonly reasonCode: CashRefundReason;
+}
+/**
+ * F27 reason (commercial: staff need to see why money went back): each refund of a table's
+ * payments with its reason in staff words — cash given back, refunded on the card machine, and to
+ * the guest's card (a refused one moved no money, and the record leaves it out too).
+ */
+export function tableRefundReasons(payments: readonly TablePayment[]): readonly RefundReason[] {
+  return Object.freeze(
+    payments.flatMap((payment) => [
+      ...payment.cashRefunds.map((refund) => ({
+        method: "Cash" as const,
+        amountMinor: refund.amountMinor,
+        at: refund.refundedAt,
+        reasonCode: refund.reasonCode,
+      })),
+      ...payment.cardRefunds.map((refund) => ({
+        method: "CardMachine" as const,
+        amountMinor: refund.amountMinor,
+        at: refund.refundedAt,
+        reasonCode: refund.reasonCode,
+      })),
+      // Round 2 F27: only a refund the card company answered went back; one still going back
+      // ("Sending") or refused never gives its reason to a refund said as given back.
+      ...payment.onlineRefunds
+        .filter((refund) => refund.state === "Refunded")
+        .map((refund) => ({
+          method: "Online" as const,
+          amountMinor: refund.amountMinor,
+          at: refund.requestedAt,
+          reasonCode: refund.reasonCode,
+        })),
+    ]),
+  );
+}
+/** F27 reason: the open order's table payments, so its refund lines can say why. */
+export const TableRefundReasonsContext = createContext<readonly RefundReason[]>([]);
+const onlineRefundLabel = (refund: TablePayment["onlineRefunds"][number]) => {
+  const reason = reasonText(refund.reasonCode);
+  return refund.state === "Refunded"
+    ? t("Refunded to the card · {reason}", { reason })
+    : refund.state === "Sending"
+      ? t("Going back to the card · {reason}", { reason })
+      : t("Card company refused · {reason}", { reason });
+};
+
+const parseOne = (value: unknown): TablePayment => {
+  const fail = (): never => {
+    throw new Error("TABLE_PAYMENT_INVALID");
+  };
+  const p = value as Record<string, unknown>;
+  const amount = (v: unknown) => (typeof v === "string" && minor.test(v) ? v : fail());
+  const reason = (v: unknown) =>
+    reasons.includes(v as CashRefundReason) ? (v as CashRefundReason) : fail();
+  const by = (v: unknown) =>
+    v === undefined || v === null ? null : typeof v === "string" && v.length <= 120 ? v : fail();
+  if (
+    (p.method !== "Cash" && p.method !== "CardMachine" && p.method !== "Online") ||
+    typeof p.takenAt !== "string" ||
+    !Array.isArray(p.cashRefunds)
+  )
+    return fail();
+  const onlineRefunds = Array.isArray(p.onlineRefunds) ? p.onlineRefunds : [];
+  const cardRefunds = Array.isArray(p.cardRefunds) ? p.cardRefunds : [];
+  return Object.freeze({
+    partNumber: typeof p.partNumber === "number" ? p.partNumber : null,
+    method: p.method,
+    roundsMinor: amount(p.roundsMinor),
+    tipMinor: amount(p.tipMinor),
+    roundingMinor: amount(p.roundingMinor),
+    totalMinor: amount(p.totalMinor),
+    takenAt: p.takenAt,
+    recordedAfterOutage: p.recordedAfterOutage === true,
+    cashRefunds: Object.freeze(
+      p.cashRefunds.map((r: Record<string, unknown>) =>
+        Object.freeze({
+          amountMinor: amount(r.amountMinor),
+          reasonCode: reason(r.reasonCode),
+          refundedAt: typeof r.refundedAt === "string" ? r.refundedAt : fail(),
+          byLabel: by(r.byLabel),
+        }),
+      ),
+    ),
+    cardRefunds: Object.freeze(
+      cardRefunds.map((r: Record<string, unknown>) =>
+        Object.freeze({
+          amountMinor: amount(r.amountMinor),
+          reasonCode: reason(r.reasonCode),
+          refundedAt: typeof r.refundedAt === "string" ? r.refundedAt : fail(),
+          byLabel: by(r.byLabel),
+        }),
+      ),
+    ),
+    onlineRefunds: Object.freeze(
+      onlineRefunds.map((r: Record<string, unknown>) =>
+        Object.freeze({
+          amountMinor: amount(r.amountMinor),
+          reasonCode: reason(r.reasonCode),
+          requestedAt: typeof r.requestedAt === "string" ? r.requestedAt : fail(),
+          byLabel: by(r.byLabel),
+          state:
+            r.state === "Sending" || r.state === "Refunded" || r.state === "Refused"
+              ? r.state
+              : fail(),
+        }),
+      ),
+    ),
+    refundableMinor: amount(p.refundableMinor),
+    canRefund: true,
+  });
+};
+
+export function parseTablePayment(value: unknown): TablePayment | null {
+  const raw = (value ?? {}) as { payment?: unknown; canRefund?: unknown };
+  return raw.payment === null || raw.payment === undefined
+    ? null
+    : { ...parseOne(raw.payment), canRefund: raw.canRefund !== false };
+}
+
+/** The whole table's payment, or one per paid part of a split bill. */
+export function parseTablePayments(value: unknown): readonly TablePayment[] {
+  const raw = (value ?? {}) as { parts?: unknown; canRefund?: unknown };
+  const whole = parseTablePayment(value);
+  return Object.freeze([
+    ...(whole === null ? [] : [whole]),
+    ...(Array.isArray(raw.parts)
+      ? raw.parts.map((part) => ({ ...parseOne(part), canRefund: raw.canRefund !== false }))
+      : []),
+  ]);
+}
+
+/**
+ * The card refund made from this panel: the newest of that amount among those listed after it
+ * (refunds are only ever added). null when it is not listed (yet).
+ */
+export function sentRefundOf(
+  payment: TablePayment,
+  sent: { readonly amountMinor: string; readonly before: number } | null,
+): TablePayment["onlineRefunds"][number] | null {
+  if (sent === null || payment.onlineRefunds.length <= sent.before) return null;
+  const newest = [...payment.onlineRefunds]
+    .filter((refund) => refund.amountMinor === sent.amountMinor)
+    .sort((a, b) => Date.parse(b.requestedAt) - Date.parse(a.requestedAt))[0];
+  return newest ?? null;
+}
+
+/**
+ * b61 (v15 b60 live, TM2 order 48): how the end of a payment's refund lines reads. Everything went
+ * back and nothing is still on its way: "Fully refunded", never "Can still be refunded $0.00", and
+ * no "It can take a few days…" line. While a refund is on its way, or something is left, the
+ * amount left and the timing line stay as before.
+ */
+export function tablePaymentRefundEnd(payment: TablePayment): {
+  /** Everything went back: what went back in all (cash, card machine, card); else null. */
+  readonly fullyRefundedMinor: string | null;
+  readonly timingLine: boolean;
+} {
+  const sending = payment.onlineRefunds.some((refund) => refund.state === "Sending");
+  const gone = payment.onlineRefunds.filter((refund) => refund.state === "Refunded");
+  const went = [...payment.cashRefunds, ...payment.cardRefunds, ...gone].reduce(
+    (sum, refund) => sum + BigInt(refund.amountMinor),
+    0n,
+  );
+  const fully = went > 0n && !sending && BigInt(payment.refundableMinor) === 0n;
+  return {
+    fullyRefundedMinor: fully ? went.toString() : null,
+    timingLine: !fully && gone.length > 0,
+  };
+}
+
+/**
+ * Batch 64: what a table's refunds are now — each one's way, amount and, for a card refund, whether
+ * it went back — so a change made or answered here can be told to the order's totals above.
+ */
+export function tableRefundsKey(payments: readonly TablePayment[]): string {
+  return JSON.stringify(
+    payments.map((payment) => [
+      payment.partNumber,
+      payment.cashRefunds.map((refund) => [refund.amountMinor, refund.refundedAt]),
+      payment.cardRefunds.map((refund) => [refund.amountMinor, refund.refundedAt]),
+      payment.onlineRefunds.map((refund) => [refund.amountMinor, refund.requestedAt, refund.state]),
+    ]),
+  );
+}
+
+async function post(fetcher: typeof fetch, path: string, csrf: string, body: unknown) {
+  const response = await fetcher(path, {
+    method: "POST",
+    credentials: "same-origin",
+    cache: "no-store",
+    redirect: "error",
+    headers: { "Content-Type": "application/json", Accept: "application/json", "X-BOP-CSRF": csrf },
+    body: JSON.stringify(body),
+  });
+  const payload = (await response.json().catch(() => null)) as { error?: unknown } | null;
+  return { status: response.status, payload };
+}
+
+/**
+ * WP-2423 DEC-DINE-IN-PAY-LATER (OPS-ORDER-QUEUE): a table's payment on its Order — how it was paid,
+ * the tip, the cash rounding, the total — and what went back. A manager gives cash back from a cash
+ * payment, or (DEC-TABLE-ONLINE-REFUND) refunds a phone payment to the guest's card: PIN-confirmed,
+ * amount and reason, recorded beside the payment. A split bill shows each paid part.
+ */
+export function TablePaymentPanel({
+  orderReference,
+  csrf,
+  fetcher = fetch,
+  onPayments,
+  onRefundsChanged,
+}: {
+  readonly orderReference: string;
+  readonly csrf: string;
+  readonly fetcher?: typeof fetch;
+  /** F27 reason: the payments as last read or changed, for the order's refund lines. */
+  readonly onPayments?: (payments: readonly TablePayment[]) => void;
+  /**
+   * Batch 64 (v15 b63 order 32: right after a refund to the card, Paid showed it while the order's
+   * totals above still read "Total $14.13" for 3-5 s, until the page's next poll): told when a
+   * refund is made here, or a later read finds one has changed (a card refund answered), so the
+   * order's totals are read again at once and both say the same.
+   */
+  readonly onRefundsChanged?: () => void;
+}) {
+  const [payments, setPayments] = useState<readonly TablePayment[]>([]);
+  const [reload, setReload] = useState(0);
+  useEffect(() => onPayments?.(payments), [payments, onPayments]);
+  // The refunds as first read: a later read or a refund made here that differs is a change.
+  const refundsShown = useRef<string | null>(null);
+  const refundsChanged = useRef(onRefundsChanged);
+  refundsChanged.current = onRefundsChanged;
+  const show = (next: readonly TablePayment[]) => {
+    const key = tableRefundsKey(next);
+    if (refundsShown.current !== null && refundsShown.current !== key) refundsChanged.current?.();
+    refundsShown.current = key;
+    setPayments(next);
+  };
+  const showRef = useRef(show);
+  showRef.current = show;
+
+  useEffect(() => {
+    let live = true;
+    post(fetcher, "/merchant/orders/table-payment", csrf, { orderReference })
+      .then(({ status, payload }) => {
+        if (!live) return;
+        if (status === 200) showRef.current(parseTablePayments(payload));
+        else setPayments([]);
+      })
+      .catch(() => {
+        if (live) setPayments([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, [fetcher, csrf, orderReference, reload]);
+
+  // A refund on its way shows its result without staff having to reopen the order.
+  const sending = payments.some((payment) =>
+    payment.onlineRefunds.some((refund) => refund.state === "Sending"),
+  );
+  // b59 (live58): the card company usually answers within seconds, so the first read comes soon
+  // after the refund is made; then every 15 s until it answers.
+  useEffect(() => {
+    if (!sending) return;
+    const soon = setTimeout(() => setReload((value) => value + 1), 3000);
+    const timer = setInterval(() => setReload((value) => value + 1), 15000);
+    return () => {
+      clearTimeout(soon);
+      clearInterval(timer);
+    };
+  }, [sending]);
+
+  return (
+    <>
+      {payments.map((payment) => (
+        <TablePaymentBlock
+          key={payment.partNumber ?? "whole"}
+          payment={payment}
+          orderReference={orderReference}
+          csrf={csrf}
+          fetcher={fetcher}
+          onChanged={show}
+          onStale={() => setReload((value) => value + 1)}
+        />
+      ))}
+    </>
+  );
+}
+
+export function TablePaymentBlock({
+  payment,
+  orderReference,
+  csrf,
+  fetcher,
+  onChanged,
+  onStale,
+}: {
+  readonly payment: TablePayment;
+  readonly orderReference: string;
+  readonly csrf: string;
+  readonly fetcher: typeof fetch;
+  readonly onChanged: (payments: readonly TablePayment[]) => void;
+  readonly onStale: () => void;
+}) {
+  const [refunding, setRefunding] = useState(false);
+  const [amount, setAmount] = useState("");
+  const [reason, setReason] = useState<CashRefundReason | "">("");
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  // Owner 2026-11-03: money is confirmed before it is recorded, and said once it is.
+  const [reviewing, setReviewing] = useState(false);
+  const [done, setDone] = useState<string | null>(null);
+  /**
+   * b59 (live58): a card refund just made. What is said about it follows its state as read
+   * (on its way, gone back, refused), never the moment it was sent, so one refund has one state.
+   */
+  const [sent, setSent] = useState<{ amountMinor: string; before: number } | null>(null);
+  // On a PIN sign-in the server asks who it is first; their role is fine.
+  const [confirmIdentity, setConfirmIdentity] = useState(false);
+  const operation = useRef<{ key: string; reference: string } | null>(null);
+  const typedMinor = useMemo(() => dollarsToMinor(amount), [amount]);
+  const online = payment.method === "Online";
+  const onMachine = payment.method === "CardMachine";
+  const timeZone = useContext(StoreTimeZoneContext);
+  const [slip, setSlip] = useState("");
+  const slipValid = slip.trim() === "" || /^[A-Za-z0-9][A-Za-z0-9 #./-]{0,39}$/u.test(slip.trim());
+
+  const refundable = BigInt(payment.refundableMinor);
+  // v15 M131: cash is handed over in nickels; the amount sent is the one handed over.
+  const amountMinor =
+    typedMinor === null || online || onMachine || typedMinor > refundable
+      ? typedMinor
+      : cashRefundNickel(typedMinor, refundable);
+  const roundedCash = amountMinor !== null && typedMinor !== null && amountMinor !== typedMinor;
+  /** v15 M177: when and by whom ("22:42 by Mei"), on every refund line. */
+  const when = (at: string, byLabel: string | null) =>
+    " · " +
+    (byLabel === null
+      ? storeWhen(at, timeZone)
+      : t("{time} by {person}", {
+          time: storeWhen(at, timeZone),
+          person: byLabel === "You" ? t("You") : byLabel,
+        }));
+  const give = async () => {
+    if (
+      busy ||
+      reason === "" ||
+      !slipValid ||
+      amountMinor === null ||
+      amountMinor <= 0n ||
+      amountMinor > refundable
+    )
+      return;
+    const key = amountMinor.toString() + ":" + reason + ":" + slip.trim();
+    if (operation.current?.key !== key)
+      operation.current = { key, reference: serviceOperationReference() };
+    setBusy(true);
+    setProblem(null);
+    try {
+      const { status, payload } = await post(
+        fetcher,
+        online
+          ? "/merchant/orders/table-payment/online-refund"
+          : onMachine
+            ? "/merchant/orders/table-payment/card-refund"
+            : "/merchant/orders/table-payment/cash-refund",
+        csrf,
+        {
+          orderReference,
+          operationReference: operation.current.reference,
+          amountMinor: amountMinor.toString(),
+          reasonCode: reason,
+          ...(onMachine ? { slipReference: slip.trim() === "" ? null : slip.trim() } : {}),
+          ...(payment.partNumber === null ? {} : { partNumber: payment.partNumber }),
+        },
+      );
+      if (status === 200) {
+        operation.current = null;
+        setConfirmIdentity(false);
+        onChanged(parseTablePayments(payload));
+        if (online)
+          setSent({ amountMinor: amountMinor.toString(), before: payment.onlineRefunds.length });
+        setDone(
+          online
+            ? null
+            : onMachine
+              ? t("Recorded {amount} refunded on the card machine.", { amount: cad(amountMinor) })
+              : t("Recorded {amount} given back in cash. Give it to the guest now.", {
+                  amount: cad(amountMinor),
+                }),
+        );
+        setRefunding(false);
+        setReviewing(false);
+        setAmount("");
+        setReason("");
+        setSlip("");
+        return;
+      }
+      // WP-2423 item 10: a server failure covers a lost COMMIT, so the refund may be on record, and
+      // a new operation would give the money back twice. The same request goes again.
+      if (status >= 500) {
+        setProblem(notConfirmedPressAgainText);
+        onStale();
+        return;
+      }
+      operation.current = null;
+      setReviewing(false);
+      if (isFullSignInRequired(status, payload)) {
+        setConfirmIdentity(true);
+        return;
+      }
+      setProblem(
+        status === 401 || status === 403
+          ? online || onMachine
+            ? t(
+                "A manager refunds this payment. Ask an Owner or Store Manager to sign in with their PIN.",
+              )
+            : t(
+                "A manager gives cash back. Ask an Owner or Store Manager to sign in with their PIN.",
+              )
+          : payload?.error === "too_much"
+            ? online || onMachine
+              ? t("That is more than is left of this payment.")
+              : t("That is more than is left of this cash payment.")
+            : online
+              ? t("The refund wasn't sent. Try again.")
+              : onMachine
+                ? t("The refund wasn't recorded. Try again.")
+                : t("The cash refund wasn't recorded. Try again."),
+      );
+      onStale();
+    } catch {
+      setProblem(
+        browserOffline()
+          ? offlineMayNotHaveGoneThroughText
+          : t(
+              "We couldn't confirm the result. Press the button again: it is never recorded twice.",
+            ),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+  const canRefund = refundable > 0n;
+  const refundEnd = tablePaymentRefundEnd(payment);
+  const sentRefund = sentRefundOf(payment, sent);
+  const sentText =
+    sentRefund === null
+      ? null
+      : sentRefund.state === "Sending"
+        ? t("{amount} is going back to the guest's card.", { amount: cad(sentRefund.amountMinor) })
+        : sentRefund.state === "Refunded"
+          ? t("{amount} went back to the guest's card.", { amount: cad(sentRefund.amountMinor) })
+          : null;
+  const openLabel = online
+    ? t("Refund to the card")
+    : onMachine
+      ? t("Record a card machine refund")
+      : t("Give cash back");
+  return (
+    <section
+      className="table-payment"
+      aria-label={
+        payment.partNumber === null
+          ? t("Paid at the table")
+          : t("Paid at the table · part {number}", { number: String(payment.partNumber) })
+      }
+    >
+      <h3>
+        {payment.partNumber === null
+          ? t("Paid at the table")
+          : t("Paid at the table · part {number}", { number: String(payment.partNumber) })}
+      </h3>
+      <dl className="table-checkout__totals">
+        <div>
+          <dt>{t("Paid by")}</dt>
+          <dd>
+            {payment.method === "Cash"
+              ? t("Cash")
+              : payment.method === "Online"
+                ? t("Guest's phone")
+                : t("Card machine")}
+          </dd>
+        </div>
+        <div>
+          <dt>{t("Rounds")}</dt>
+          <dd>{cad(payment.roundsMinor)}</dd>
+        </div>
+        {/* Batch 43 (v15 Fireside Hotpot, tips off): no "Tip $0.00" when no tip was taken. */}
+        {payment.tipMinor !== "0" ? (
+          <div>
+            <dt>{t("Tip")}</dt>
+            <dd>{cad(payment.tipMinor)}</dd>
+          </div>
+        ) : null}
+        {payment.roundingMinor !== "0" ? (
+          <div>
+            <dt>{t("Cash rounding")}</dt>
+            <dd>{cad(payment.roundingMinor)}</dd>
+          </div>
+        ) : null}
+        <div>
+          <dt>{t("Total paid")}</dt>
+          <dd>{cad(payment.totalMinor)}</dd>
+        </div>
+        {payment.cashRefunds.map((refund, index) => (
+          <div key={index}>
+            <dt>
+              {t("Cash given back · {reason}", { reason: reasonText(refund.reasonCode) }) +
+                when(refund.refundedAt, refund.byLabel)}
+            </dt>
+            <dd>−{cad(refund.amountMinor)}</dd>
+          </div>
+        ))}
+        {payment.cardRefunds.map((refund, index) => (
+          <div key={index}>
+            <dt>
+              {t("Refunded on the card machine · {reason}", {
+                reason: reasonText(refund.reasonCode),
+              }) + when(refund.refundedAt, refund.byLabel)}
+            </dt>
+            <dd>−{cad(refund.amountMinor)}</dd>
+          </div>
+        ))}
+        {payment.onlineRefunds.map((refund, index) => (
+          <div key={index}>
+            <dt>{onlineRefundLabel(refund) + when(refund.requestedAt, refund.byLabel)}</dt>
+            <dd>
+              {refund.state === "Refused" ? cad(refund.amountMinor) : "−" + cad(refund.amountMinor)}
+            </dd>
+          </div>
+        ))}
+        {refundEnd.fullyRefundedMinor !== null ? (
+          // b61 (v15 b60 live): everything went back; never "Can still be refunded $0.00".
+          <div>
+            <dt>{t("Fully refunded")}</dt>
+            <dd>{cad(refundEnd.fullyRefundedMinor)}</dd>
+          </div>
+        ) : refundable !== BigInt(payment.totalMinor) ? (
+          <div>
+            {/* v15 M177: what may still go back, said plainly (not something owed). */}
+            <dt>{t("Can still be refunded")}</dt>
+            <dd>{cad(refundable)}</dd>
+          </div>
+        ) : null}
+      </dl>
+      {payment.recordedAfterOutage ? <p role="note">{t("Recorded after an outage.")}</p> : null}
+      {payment.onlineRefunds.some((refund) => refund.state === "Sending") ? (
+        <p role="status">
+          {t(
+            "On its way to the card company. We keep sending it until they answer; you don't need to press again.",
+          )}
+        </p>
+      ) : null}
+      {refundEnd.timingLine ? (
+        <p role="note">{t("It can take a few days to show on the guest's card.")}</p>
+      ) : null}
+      {payment.onlineRefunds.some((refund) => refund.state === "Refused") ? (
+        <p role="note">{t("A refused refund moved no money. You can refund it again.")}</p>
+      ) : null}
+      {canRefund && !payment.canRefund ? (
+        <p role="note">{t("Refunds are made by a manager.")}</p>
+      ) : canRefund ? (
+        refunding ? (
+          <div role="group" aria-label={openLabel} className="table-payment__refund">
+            <label className="table-checkout__field">
+              {online || onMachine ? t("Amount to refund") : t("Amount to give back")}
+              <input
+                inputMode="decimal"
+                value={amount}
+                aria-invalid={
+                  amount !== "" &&
+                  (amountMinor === null || amountMinor <= 0n || amountMinor > refundable)
+                }
+                onChange={(event) => setAmount(event.currentTarget.value)}
+              />
+              <small>{t("Up to {amount}", { amount: cad(refundable) })}</small>
+              {roundedCash && amountMinor !== null ? (
+                <small role="note">
+                  {t("Hand over {cash} (rounded to 5¢)", { cash: cad(amountMinor) })}
+                </small>
+              ) : null}
+            </label>
+            <label className="table-checkout__field">
+              {t("Reason")}
+              <select
+                value={reason}
+                onChange={(event) => setReason(event.currentTarget.value as CashRefundReason | "")}
+              >
+                <option value="">{t("Choose a reason")}</option>
+                {reasons.map((code) => (
+                  <option key={code} value={code}>
+                    {reasonText(code)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {onMachine ? (
+              <>
+                <p role="note">
+                  {t(
+                    "Make the refund on the card machine first, to the card that paid, then record it here. This only records it: no money moves from this screen.",
+                  )}
+                </p>
+                <label className="table-checkout__field">
+                  {t("Slip reference (optional)")}
+                  <input
+                    value={slip}
+                    aria-invalid={!slipValid}
+                    onChange={(event) => setSlip(event.currentTarget.value)}
+                  />
+                </label>
+              </>
+            ) : null}
+            {reviewing && amountMinor !== null && reason !== "" ? (
+              <div
+                role="alertdialog"
+                aria-labelledby="table-refund-confirm"
+                className="table-checkout__confirm"
+              >
+                <h4 id="table-refund-confirm">{t("Confirm the refund")}</h4>
+                <dl className="table-checkout__totals">
+                  <div>
+                    <dt>
+                      {online || onMachine ? t("Amount to refund") : t("Amount to give back")}
+                    </dt>
+                    <dd>{cad(amountMinor)}</dd>
+                  </div>
+                  <div>
+                    <dt>{t("Reason")}</dt>
+                    <dd>{reasonText(reason)}</dd>
+                  </div>
+                </dl>
+                <p>
+                  {/* WP-2423 M163: a mistaken refund is corrected by a new record, never edited. */}
+                  {t(
+                    "Once recorded, it can't be changed. If too much was given back, use Take money back on the order's payment.",
+                  )}
+                </p>
+                <div className="table-checkout__confirm-actions">
+                  <button type="button" disabled={busy} onClick={() => setReviewing(false)}>
+                    {t("Back")}
+                  </button>
+                  <button
+                    type="button"
+                    className="table-checkout__primary"
+                    disabled={busy}
+                    onClick={() => void give()}
+                  >
+                    {busy
+                      ? online
+                        ? t("Sending…")
+                        : t("Recording…")
+                      : online
+                        ? t("Confirm: refund {amount} to the card", { amount: cad(amountMinor) })
+                        : onMachine
+                          ? t("Confirm: record {amount} refunded", { amount: cad(amountMinor) })
+                          : t("Confirm: give back {amount} in cash", { amount: cad(amountMinor) })}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="table-checkout__primary"
+                  disabled={
+                    busy ||
+                    !slipValid ||
+                    reason === "" ||
+                    amountMinor === null ||
+                    amountMinor <= 0n ||
+                    amountMinor > refundable
+                  }
+                  onClick={() => setReviewing(true)}
+                >
+                  {amountMinor !== null && amountMinor > 0n
+                    ? online
+                      ? t("Refund {amount} to the card", { amount: cad(amountMinor) })
+                      : onMachine
+                        ? t("Record {amount} refunded on the card machine", {
+                            amount: cad(amountMinor),
+                          })
+                        : t("Give back {amount} in cash", { amount: cad(amountMinor) })
+                    : openLabel}
+                </button>{" "}
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    setRefunding(false);
+                    setReviewing(false);
+                  }}
+                >
+                  {t("Cancel")}
+                </button>
+              </>
+            )}
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              setDone(null);
+              setSent(null);
+              setRefunding(true);
+            }}
+          >
+            {openLabel}
+          </button>
+        )
+      ) : null}
+      {confirmIdentity ? <FullSignInPrompt csrf={csrf} fetcher={fetcher} /> : null}
+      {problem ? <p role="alert">{problem}</p> : null}
+      {done ? <p role="status">{done}</p> : null}
+      {sentText ? <p role="status">{sentText}</p> : null}
+    </section>
+  );
+}

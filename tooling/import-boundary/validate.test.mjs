@@ -163,6 +163,34 @@ describe("Import Boundary Architecture Test", () => {
     await writeFile(file, JSON.stringify(value));
     expect(await codes(context.root)).toContain("EXPORT_MAP_MISMATCH");
   });
+  it.each([
+    [
+      "accepts an unbuilt dist target beside its source target",
+      {
+        types: "./src/index.ts",
+        development: "./src/index.ts",
+        default: "./dist/packages/bop/synthetic-kernel/src/index.js",
+      },
+      [],
+    ],
+    [
+      "rejects an export with only build output",
+      { default: "./dist/index.js" },
+      ["INVALID_EXPORT_TARGET"],
+    ],
+    [
+      "still requires the source target to exist",
+      { types: "./src/missing.ts", default: "./dist/index.js" },
+      ["MISSING_EXPORT_TARGET"],
+    ],
+  ])("%s", async (_name, target, expected) => {
+    const context = await fixture();
+    const file = join(context.root, "packages/bop/synthetic-kernel/package.json");
+    const value = JSON.parse(await readFile(file));
+    value.exports["."] = target;
+    await writeFile(file, JSON.stringify(value));
+    expect(await codes(context.root)).toEqual(expected);
+  });
   it("rejects case-conflicting package identity", async () => {
     const context = await fixture();
     await source(context.bop, 'import "@bop/Synthetic-Kernel";');

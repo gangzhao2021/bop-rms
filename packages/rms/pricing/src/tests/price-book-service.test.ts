@@ -125,7 +125,14 @@ function digest(value: string) {
   }
   return `sha256:${(state >>> 0).toString(16).padStart(8, "0").repeat(8)}`;
 }
-function fixture(options: { sameActorApproval?: boolean; denied?: boolean } = {}) {
+function fixture(
+  options: {
+    sameActorApproval?: boolean;
+    denied?: boolean;
+    soleOperator?: boolean;
+    soleOperatorAuditMark?: boolean;
+  } = {},
+) {
   let aggregate: PriceBookSnapshot | null = null;
   const operations = new Map<string, PriceBookOperationRecord>();
   const ports: PriceBookPorts = {
@@ -163,6 +170,9 @@ function fixture(options: { sameActorApproval?: boolean; denied?: boolean } = {}
                 ? ids.actor
                 : ids.author
               : null,
+          ...(options.soleOperator && input.action === "Publish"
+            ? { soleOperatorApproval: true }
+            : {}),
           audit: {
             auditId: ids.audit,
             brandId: ids.brand,
@@ -171,7 +181,10 @@ function fixture(options: { sameActorApproval?: boolean; denied?: boolean } = {}
             targetType: "PricingPriceBook",
             targetId: ids.book,
             beforeSummary: {},
-            afterSummary: {},
+            afterSummary:
+              (options.soleOperatorAuditMark ?? options.soleOperator) && input.action === "Publish"
+                ? { approvalMode: "SoleOperator" }
+                : {},
             reasonCode: "AUTHORIZED_OPERATION",
             correlationId: ids.correlation,
             occurredAt: input.observedAt,
@@ -242,7 +255,7 @@ describe("Price Book administration workflow", () => {
   it("requires an independent authorized approver and complete coverage to publish", async () => {
     const same = fixture({ sameActorApproval: true });
     await same.service.createDraft({
-      candidate: snapshot(),
+      candidate: snapshot({ entries: true }),
       operationReference: ids.operation,
       requestedAt: at,
     });
@@ -266,7 +279,7 @@ describe("Price Book administration workflow", () => {
     });
     const state = fixture();
     await state.service.createDraft({
-      candidate: snapshot(),
+      candidate: snapshot({ entries: true }),
       operationReference: ids.operation,
       requestedAt: at,
     });
@@ -276,6 +289,109 @@ describe("Price Book administration workflow", () => {
     });
     expect(state.operation(ids.operation2)?.event.eventType).toBe("PriceBookVersionPublished");
   });
+  it("WP-2423 Q19: lets the author publish alone only as a marked sole operator", async () => {
+    const publishInput = {
+      priceBookReference: ids.book,
+      expectedAggregateVersion: 1,
+      candidate: snapshot({
+        lifecycle: "Published",
+        aggregateVersion: 2,
+        versionNumber: 2,
+        versionReference: ids.version2,
+        createdAt: later,
+        entries: true,
+      }),
+      coverageContexts: coverage,
+      operationReference: ids.operation2,
+      requestedAt: later,
+    };
+    const run = async (options: Parameters<typeof fixture>[0]) => {
+      const state = fixture(options);
+      await state.service.createDraft({
+        candidate: snapshot({ entries: true }),
+        operationReference: ids.operation,
+        requestedAt: at,
+      });
+      return state.service.publish(publishInput);
+    };
+    await expect(run({ sameActorApproval: true, soleOperator: true })).resolves.toMatchObject({
+      status: "Applied",
+      aggregate: { lifecycle: "Published" },
+    });
+    // The mark is never accepted for someone else's draft.
+    await expect(run({ soleOperator: true })).rejects.toMatchObject({
+      code: "PRICE_BOOK_APPROVAL_REQUIRED",
+    });
+    // The publication's Audit must say SoleOperator exactly when it is one.
+    await expect(
+      run({ sameActorApproval: true, soleOperator: true, soleOperatorAuditMark: false }),
+    ).rejects.toMatchObject({ code: "PRICE_BOOK_PERMISSION_DENIED" });
+    await expect(run({ soleOperatorAuditMark: true })).rejects.toMatchObject({
+      code: "PRICE_BOOK_PERMISSION_DENIED",
+    });
+  });
+  it.each(["amount", "removedEntry", "currencyMetadata"])(
+    "rejects %s changes introduced during approval",
+    async (change) => {
+      const state = fixture();
+      const draft = snapshot({ entries: true });
+      await state.service.createDraft({
+        candidate:
+          change === "removedEntry"
+            ? {
+                ...draft,
+                entries: [
+                  ...draft.entries,
+                  ...draft.entries.map((entry) => ({
+                    ...entry,
+                    entryReference: parsePricingReference(id(16)),
+                    sellableReference: parsePricingReference(id(17)),
+                  })),
+                ],
+              }
+            : draft,
+        operationReference: ids.operation,
+        requestedAt: at,
+      });
+      const candidate = snapshot({
+        lifecycle: "Published",
+        aggregateVersion: 2,
+        versionNumber: 2,
+        versionReference: ids.version2,
+        createdAt: later,
+        entries: true,
+      });
+      const changed =
+        change === "amount"
+          ? {
+              ...candidate,
+              entries: candidate.entries.map((entry) => ({
+                ...entry,
+                amount: { ...entry.amount, amountMinor: 1300n },
+              })),
+            }
+          : change === "removedEntry"
+            ? candidate
+            : {
+                ...candidate,
+                currencyMetadata: {
+                  ...candidate.currencyMetadata,
+                  metadataVersion: 2,
+                },
+              };
+      await expect(
+        state.service.publish({
+          priceBookReference: ids.book,
+          expectedAggregateVersion: 1,
+          candidate: changed,
+          coverageContexts: coverage,
+          operationReference: ids.operation2,
+          requestedAt: later,
+        }),
+      ).rejects.toMatchObject({ code: "PRICE_BOOK_INPUT_INVALID" });
+      expect(state.operation(ids.operation2)).toBeUndefined();
+    },
+  );
   it("fails closed on denied permission and stale Expected Version", async () => {
     await expect(
       fixture({ denied: true }).service.createDraft({

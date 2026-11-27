@@ -1,0 +1,1218 @@
+/* WP-2423 merchant UI refresh (2026-10-21, redone 2026-11-03): counter-order. Loaded after styles.css so it refines the shared baseline. */
+/* Counter order (OPS-ORDER-ENTRY), benchmarked on counter POS screens: the menu always on the left
+   as a quick list (search and categories stay at the top), the order always on the right with its
+   total and Send order always in view; choices open over the menu so the order never moves. Plain
+   text rows with hairlines, per the v3 rules: no boxes, one accent, 28/20/16/14 at 600/400. On a
+   phone the order stacks under the menu and a bottom bar keeps it one tap away. */
+
+.counter-order .counter-order__layout {
+  grid-template-columns: minmax(0, 1fr) minmax(20rem, 24rem);
+  /* The menu spans both rows: its extra height goes under the charge, not between the two. */
+  grid-template-rows: auto 1fr;
+  gap: 32px;
+}
+/* Once sent, the order is settled: what is left to do is the charge. */
+.counter-order__layout:has(.counter-order__charge) .counter-order__tip,
+.counter-order__layout:has(.counter-order__charge) .counter-order__paper {
+  display: none;
+}
+.counter-order__hidden-heading {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.counter-order .counter-order__primary {
+  border: 0;
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-primary);
+  font-weight: 600;
+}
+.counter-order .counter-order__primary:hover:not(:disabled) {
+  background: var(--bop-color-accent);
+}
+.counter-order .counter-order__primary:disabled {
+  background: var(--bop-color-surface-raised);
+  color: var(--bop-color-text-muted);
+}
+
+/* ---- Menu: search and categories stay at the top ------------------------------------------ */
+.counter-order__menu-bar {
+  position: sticky;
+  top: var(--bop-pinned-top, 0px);
+  z-index: 5;
+  display: grid;
+  gap: 4px;
+  background: var(--bop-color-surface-canvas);
+}
+.counter-order__search input {
+  width: 100%;
+  min-height: 44px;
+  font-size: 16px;
+}
+.counter-order__categories {
+  display: flex;
+  gap: 24px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  /* Batch 61 (v15 b60 live): a scroll box cuts off what is drawn past its padding edge, so the
+     category rings lost their top and bottom (and the first its left side too). 4px of room all
+     round, given back by the same negative margin, holds a ring drawn 1px out (3px + 1px); the
+     4px above is the bar's gap, so the row and the buttons stay where v3 draws them. The end has
+     5px: the row scrolls in whole pixels, so 4px left the last ring a third of a pixel short.
+     The room is see-through and must not take taps meant for the dish rows scrolled beneath it,
+     so only the buttons take pointer events. */
+  margin: -4px -5px -4px -4px;
+  padding: 4px 5px 4px 4px;
+  pointer-events: none;
+}
+.counter-order__categories button:focus-visible {
+  outline-offset: 1px;
+}
+.counter-order__categories button {
+  /* The row's focus handler scrolls a half-hidden category in with this much room for its ring
+     (4px), plus 1px at the sides because the row scrolls in whole pixels. */
+  scroll-margin: 4px 5px;
+  pointer-events: auto;
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-text-default);
+  font: inherit;
+  font-size: 14px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.counter-order__categories button:hover,
+.counter-order__categories button[aria-current="true"] {
+  color: var(--bop-color-accent);
+}
+.counter-order__categories button[aria-current="true"] {
+  font-weight: 600;
+  /* Batch 64 (v15 b63 live, CK-18, v3 41:48): the chosen category is underlined, 2 px in the
+     accent under its words; drawn inside the 44 px target so nothing moves. */
+  box-shadow: inset 0 -2px 0 var(--bop-color-accent);
+}
+.counter-order__section {
+  scroll-margin-top: calc(var(--bop-pinned-top, 0px) + 6.5rem);
+}
+.counter-order .counter-order__menu h3 {
+  margin: 24px 0 4px;
+  color: var(--bop-color-text-default);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.counter-order__menu-empty {
+  margin: 24px 0 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+
+/* Dish rows, two columns where there is room: the whole row is the button. The first row has no
+   line above it (the list clips it), the last no line below. Batch 63 (CK-18): each line runs
+   across the whole grid row, so a row with one dish (the last, or one beside a taller one) is
+   ruled like the others; the list clips what runs past its right edge. */
+.counter-order .counter-order__items {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(17rem, 100%), 1fr));
+  column-gap: 32px;
+  overflow: hidden;
+}
+.counter-order .counter-order__items li {
+  position: relative;
+  display: block;
+  margin-top: -1px;
+  /* The dish button starts under its line, so a first-row ring is not cut by the list's top. */
+  padding: 1px 0 0;
+  border: 0;
+}
+.counter-order .counter-order__items li::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 1px;
+  background: var(--bop-color-row-divider);
+  pointer-events: none;
+}
+.counter-order__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  min-height: 52px;
+  padding: 8px 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-text-default);
+  font: inherit;
+  font-size: 16px;
+  text-align: start;
+  cursor: pointer;
+}
+.counter-order__item:hover:not(:disabled) .counter-order__item-name,
+.counter-order__item:active:not(:disabled) .counter-order__item-name {
+  color: var(--bop-color-accent);
+}
+.counter-order__item:focus-visible,
+.counter-order .counter-order__sizes > button:focus-visible {
+  outline: 2px solid var(--bop-color-focus);
+  outline-offset: -2px;
+}
+.counter-order .counter-order__item-name {
+  overflow-wrap: anywhere;
+}
+/* Batch 63 (F41): the dish's Chinese name under the English one, as on the kitchen ticket. */
+.counter-order .counter-order__item-other {
+  display: block;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.counter-order .counter-order__item-price {
+  flex: none;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.counter-order__in-order {
+  color: var(--bop-color-accent);
+  font-weight: 600;
+}
+.counter-order__item:disabled {
+  cursor: not-allowed;
+}
+/* Sold out: struck name and "Sold out" said in the price slot (never colour only). */
+.counter-order .counter-order__items li[data-available="false"] .counter-order__item-name {
+  color: var(--bop-color-text-muted);
+  text-decoration: line-through;
+}
+.counter-order .counter-order__items li[data-available="false"] .counter-order__item-price {
+  color: var(--bop-color-text-default);
+}
+
+/* Owner 2026-10-26: one row per drink; its sizes are the buttons, each with its price. */
+.counter-order .counter-order__items li.counter-order__family {
+  grid-column: 1 / -1;
+  padding: 12px 0 4px;
+}
+.counter-order .counter-order__family > .counter-order__item-name {
+  font-size: 16px;
+}
+.counter-order .counter-order__sizes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0 24px;
+}
+.counter-order .counter-order__sizes > button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 14px;
+  text-align: start;
+  cursor: pointer;
+}
+.counter-order .counter-order__sizes > button:disabled {
+  color: var(--bop-color-text-muted);
+  cursor: not-allowed;
+}
+.counter-order .counter-order__sizes > button[data-available="false"] > span:first-child {
+  text-decoration: line-through;
+}
+
+/* ---- Order: its total and Send order stay in view; the lines scroll ----------------------- */
+.counter-order .counter-order__ticket {
+  gap: 16px;
+  padding: 0;
+  border: 0;
+}
+.counter-order__layout:not(:has(.counter-order__charge)) .counter-order__ticket {
+  position: sticky;
+  top: calc(var(--bop-pinned-top, 0px) + 16px);
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 2 * 16px - var(--bop-pinned-top, 0px));
+  /* b12: a long foot (paper payment, a slip question, a refusal) never pushes Send or an answer
+     below the window: the order panel scrolls on its own, and its lines keep one row in view. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Batch 60: a scroll box cuts off what is drawn past its padding edge. 8px of padding all round
+     holds the focus rings of the heading, the fields and Send (up to 3px + 3px offset), and the
+     same negative margin keeps the panel where it was. */
+  margin: -8px;
+  padding: 8px;
+}
+.counter-order__layout:not(:has(.counter-order__charge))
+  .counter-order__ticket
+  :is(a[href], button, input, select, textarea, summary, [tabindex]) {
+  scroll-margin: 8px;
+}
+.counter-order__layout:not(:has(.counter-order__charge))
+  .counter-order__ticket
+  .counter-order__lines {
+  min-height: 4.5rem;
+}
+.counter-order__ticket-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+.counter-order .counter-order__ticket-header h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+.counter-order__ticket-header h2:focus-visible {
+  outline: 2px solid var(--bop-color-focus);
+  outline-offset: 4px;
+}
+.counter-order__count {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.counter-order__empty p {
+  margin: 0;
+  font-size: 14px;
+}
+.counter-order__empty .counter-order__empty-title {
+  font-size: 16px;
+}
+.counter-order .counter-order__lines {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* Batch 60: the lines scroll on their own, so their last row's buttons and those at the right
+   edge lost part of their focus rings; 8px of room below and to the right, given back by the
+   margin, holds them. */
+.counter-order__layout:not(:has(.counter-order__charge))
+  .counter-order__ticket
+  .counter-order__lines {
+  margin: 0 -8px -8px 0;
+  padding: 0 8px 8px 0;
+}
+/* Name and price, with the quantity buttons under them; lines between, none outside. */
+.counter-order .counter-order__lines li {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0 16px;
+  align-items: start;
+  padding: 12px 0 0;
+  border: 0;
+}
+.counter-order .counter-order__lines li + li {
+  border-top: 1px solid var(--bop-color-row-divider);
+}
+.counter-order .counter-order__lines li:first-child {
+  padding-top: 0;
+}
+.counter-order__line-name {
+  font-size: 16px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.counter-order__line-name .bop-muted {
+  font-size: 14px;
+}
+.counter-order__line-price {
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+  white-space: nowrap;
+}
+.counter-order__line-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.counter-order__line-actions button {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  text-align: end;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.counter-order__line-actions .counter-order__step {
+  font-size: 20px;
+  line-height: 1;
+}
+.counter-order__line-actions .counter-order__step:first-child {
+  margin-inline-start: -14px;
+}
+.counter-order__line-actions .counter-order__change {
+  margin-inline-start: auto;
+}
+.counter-order__line-actions .counter-order__step + .counter-order__remove {
+  margin-inline-start: auto;
+}
+.counter-order__line-actions button:disabled {
+  color: var(--bop-color-text-muted);
+  cursor: not-allowed;
+}
+
+.counter-order__ticket-foot {
+  display: grid;
+  flex: none;
+  gap: 12px;
+}
+.counter-order__totals {
+  display: grid;
+  gap: 4px;
+}
+.counter-order__subtotal {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.counter-order .counter-order__estimate {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+
+/* Tip: one row of plain choices; the chosen one in the accent. */
+.counter-order .counter-order__tip {
+  grid-template-columns: repeat(5, auto);
+  justify-content: space-between;
+  gap: 0;
+}
+.counter-order .counter-order__tip legend {
+  margin-bottom: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.counter-order .counter-order__tip > label {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 8px;
+  border-radius: var(--bop-radius-control);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.counter-order .counter-order__tip > label > input[type="radio"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+}
+.counter-order .counter-order__tip > label:has(> input:checked) {
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-primary);
+  font-weight: 600;
+}
+.counter-order .counter-order__tip > label:has(> input:focus-visible) {
+  outline: 2px solid var(--bop-color-focus);
+  outline-offset: 2px;
+}
+.counter-order .counter-order__tip:disabled > label {
+  color: var(--bop-color-text-muted);
+  cursor: not-allowed;
+}
+.counter-order .counter-order__tip:disabled > label:has(> input:checked) {
+  background: var(--bop-color-text-muted);
+  color: var(--bop-color-on-primary);
+}
+.counter-order .counter-order__tip > label.counter-order__custom-tip {
+  grid-column: 1 / -1;
+  display: grid;
+  justify-content: stretch;
+  gap: 4px;
+  min-height: 0;
+  padding: 0;
+  font-size: 14px;
+  cursor: default;
+}
+.counter-order__custom-tip input {
+  min-height: 44px;
+  font-variant-numeric: tabular-nums;
+}
+
+.counter-order .counter-order__paper > label {
+  min-height: 44px;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.counter-order .counter-order__paper > label:has(> input[type="datetime-local"]) {
+  display: grid;
+  gap: 4px;
+}
+.counter-order .counter-order__paper input[type="datetime-local"] {
+  min-height: 44px;
+}
+.counter-order__ticket [role="alert"] {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+/* Batch 56: a send the table refused, held with its reason and a way to read the table again. */
+.counter-order .counter-order__table-hold {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  min-width: 0;
+}
+.counter-order .counter-order__table-hold > p {
+  overflow-wrap: anywhere;
+}
+.counter-order .counter-order__table-hold > button {
+  min-height: 44px;
+}
+.counter-order .counter-order__send {
+  display: block;
+}
+.counter-order .counter-order__send .counter-order__primary {
+  width: 100%;
+  min-height: 52px;
+  font-size: 16px;
+}
+
+/* ---- Choices: over the menu, so the order stays put --------------------------------------- */
+/* Batch 63 (F44, Figma 56:104): the choices scroll inside the dialog if they must; what is still
+   to choose, Cancel and Add to order stay at its bottom. Each group is one wrapping row of plain
+   choices with the chosen one a dark pill (v3 45:2), every choice at least 44 px tall. */
+.counter-order__choose {
+  width: min(35rem, calc(100% - 32px));
+  max-height: 85vh;
+  margin: auto;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 12px;
+  background: var(--bop-color-surface-default);
+  color: var(--bop-color-text-default);
+}
+.counter-order__choose::backdrop {
+  background: rgb(0 0 0 / 30%);
+}
+.counter-order__choose form {
+  display: flex;
+  flex-direction: column;
+  max-height: 85vh;
+}
+.counter-order__choose-body {
+  display: grid;
+  gap: 20px;
+  min-height: 0;
+  padding: 24px 24px 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.counter-order__choose-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+.counter-order__choose h3 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+.counter-order__choose h3:focus-visible {
+  outline: none;
+}
+.counter-order__choose-price {
+  flex: none;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.counter-order__choose fieldset {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.counter-order__choose legend {
+  margin-bottom: 4px;
+  padding: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.counter-order__choose fieldset > p {
+  margin: 0;
+  font-size: 14px;
+}
+.counter-order__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+.counter-order__choices > label {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  margin: 0;
+  padding: 0 16px;
+  border-radius: 22px;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.counter-order__choices > label > input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+}
+.counter-order__choices > label:has(> input:checked) {
+  background: var(--bop-color-text-default);
+  color: var(--bop-color-on-primary);
+  font-weight: 600;
+}
+.counter-order__choices > label:has(> input:checked) .counter-order__option-price {
+  color: var(--bop-color-on-primary);
+}
+.counter-order__choices > label:has(> input:focus-visible) {
+  outline: 2px solid var(--bop-color-focus);
+  outline-offset: 2px;
+}
+.counter-order__choices > label:has(> input:disabled) {
+  color: var(--bop-color-text-muted);
+  cursor: not-allowed;
+}
+.counter-order__option-price {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.counter-order__stepper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+.counter-order__stepper-label {
+  min-width: 4rem;
+  margin-inline-end: 8px;
+  font-weight: 600;
+}
+.counter-order__stepper button {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+.counter-order__stepper button:disabled {
+  color: var(--bop-color-text-muted);
+  cursor: not-allowed;
+}
+.counter-order__stepper output {
+  min-width: 2ch;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.counter-order__choose .counter-order__note {
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+}
+.counter-order__choose-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 16px;
+  padding: 8px 24px 24px;
+  background: var(--bop-color-surface-default);
+}
+.counter-order__choose-missing {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.counter-order__choose-actions .counter-order__primary {
+  grid-column: 1 / -1;
+  min-height: 52px;
+  font-size: 16px;
+}
+.counter-order__choose-actions .counter-order__primary:disabled {
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-primary);
+  opacity: 0.4;
+}
+.counter-order__choose-actions .counter-order__choose-cancel {
+  /* Batch 64 (v15 b63 live): zh-Hans 取消 was a 28 px wide target; 44 x 44 at least. */
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+/* ---- Charge ----------------------------------------------------------------------------- */
+.counter-order .counter-order__charge h2 {
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.counter-order .counter-order__charge .counter-order__primary {
+  width: 100%;
+  min-height: 52px;
+  font-size: 16px;
+}
+.counter-order .counter-order__charge .card-actions {
+  display: flex;
+}
+.workspace-page .store-card.counter-order__charge dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+.workspace-page .store-card.counter-order__charge dl dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.workspace-page .store-card.counter-order__charge dl div:last-child {
+  font-size: 16px;
+}
+
+/* ---- Batch 63 (F42, v3 41:171): sent at the counter — the sent lines where the menu was, and
+   one payment panel beside them: the amount once at 28/600, its parts in grey, two steps and one
+   accent button; cancelling is red text (it asks first), going back is accent text. ---------- */
+.counter-order .counter-order__layout[data-sent] {
+  grid-template-rows: auto;
+}
+.counter-order__layout[data-sent] > .counter-order__menu {
+  display: none;
+}
+.counter-order__layout[data-sent] > .counter-order__ticket {
+  grid-column: 1;
+  grid-row: 1;
+}
+.counter-order__layout[data-sent] > .counter-order__charge {
+  grid-column: 2;
+  grid-row: 1;
+}
+.counter-order__sent-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.counter-order__layout[data-sent] .counter-order__ticket-header {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+.counter-order .counter-order__layout[data-sent] .counter-order__ticket-header h2 {
+  font-size: 28px;
+}
+.counter-order__dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--bop-color-accent);
+}
+.counter-order__dot[data-state="done"] {
+  background: var(--bop-color-success-mark);
+}
+.counter-order .counter-order__layout[data-sent] .counter-order__charge {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 0;
+  border: 0;
+}
+.counter-order .counter-order__charge h2 {
+  margin: 0;
+}
+.counter-order__layout[data-sent] .counter-order__charge p {
+  margin: 0;
+}
+.counter-order .counter-order__due {
+  font-size: 28px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+.counter-order__due-parts,
+.counter-order__deadline {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.counter-order .counter-order__deadline[data-tier="urgent"] {
+  color: var(--bop-color-danger);
+}
+.counter-order .counter-order__change-due {
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.counter-order .counter-order__steps {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-inline-start: 1.25em;
+  font-size: 14px;
+  list-style: decimal;
+}
+.counter-order__layout[data-sent] .counter-order__charge form > label {
+  display: grid;
+  gap: 4px;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.counter-order__layout[data-sent] .counter-order__charge form {
+  gap: 12px;
+}
+.counter-order__layout[data-sent] .counter-order__charge .field-hint,
+.counter-order__layout[data-sent] .counter-order__charge .bop-muted {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+/* How the guest pays: two choices of 44 px side by side, the chosen one a dark pill (as F44). */
+.counter-order .counter-order__tender {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+.counter-order .counter-order__tender legend {
+  width: 100%;
+  margin-bottom: 4px;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.counter-order .counter-order__tender > label {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 22px;
+  font-size: 16px;
+  cursor: pointer;
+}
+.counter-order .counter-order__tender > label > input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+}
+.counter-order .counter-order__tender > label:has(> input:checked) {
+  background: var(--bop-color-text-default);
+  color: var(--bop-color-on-primary);
+  font-weight: 600;
+}
+.counter-order .counter-order__tender > label:has(> input:focus-visible) {
+  outline: 2px solid var(--bop-color-focus);
+  outline-offset: 2px;
+}
+.counter-order .counter-order__tender:disabled > label {
+  color: var(--bop-color-text-muted);
+  cursor: not-allowed;
+}
+.counter-order .counter-order__charge-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 24px;
+}
+.counter-order :is(.counter-order__danger-text, .counter-order__accent-text) {
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.counter-order .counter-order__danger-text {
+  color: var(--bop-color-danger);
+}
+.counter-order .counter-order__accent-text,
+.counter-order .counter-order__charge .card-actions > a {
+  color: var(--bop-color-accent);
+}
+.counter-order .counter-order__charge .card-actions > a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: 14px;
+  text-decoration: none;
+}
+.counter-order__layout[data-sent] .counter-order__charge .card-actions {
+  flex-wrap: wrap;
+  gap: 8px 24px;
+}
+@media (max-width: 900px) {
+  .counter-order__layout[data-sent] > .counter-order__charge {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .counter-order__layout[data-sent] > .counter-order__ticket {
+    grid-row: 2;
+  }
+}
+
+/* ---- Sent, not paid yet (WP-2423 v15 751dd768) ------------------------------------------ */
+.counter-order .counter-order__awaiting {
+  margin-bottom: var(--bop-space-4);
+}
+.counter-order .counter-order__awaiting h2 {
+  font-size: 16px;
+  font-weight: 600;
+}
+.counter-order .counter-order__awaiting-list {
+  display: grid;
+  gap: var(--bop-space-3);
+  margin: var(--bop-space-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.counter-order .counter-order__awaiting-list > li {
+  display: grid;
+  justify-items: start;
+  gap: var(--bop-space-2);
+}
+/* Batch 63 (CK-03): a hairline between rows only, as everywhere else. */
+.counter-order .counter-order__awaiting-list > li + li {
+  padding-top: var(--bop-space-3);
+  border-top: 1px solid var(--bop-color-row-divider);
+}
+.counter-order .counter-order__awaiting .staff-round-payment {
+  display: grid;
+  gap: 12px;
+  width: min(100%, 28rem);
+}
+.counter-order .counter-order__awaiting .staff-round-payment p {
+  margin: 0;
+}
+.counter-order .counter-order__awaiting .counter-order__primary {
+  min-height: 44px;
+  padding: 0 20px;
+  font-size: 16px;
+}
+.counter-order .counter-order__awaiting .card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 24px;
+}
+.counter-order .counter-order__awaiting-list p {
+  margin: 0;
+}
+.counter-order .counter-order__awaiting-paid {
+  margin: 0 0 var(--bop-space-4);
+}
+
+/* Phone summary bar (hidden where the ticket is beside the menu). */
+.counter-order__summary-bar {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .counter-order .counter-order__layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+  }
+  .counter-order__layout:not(:has(.counter-order__charge)) .counter-order__ticket {
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
+  .counter-order__ticket-header {
+    position: static;
+  }
+  .counter-order .counter-order__send {
+    position: static;
+  }
+  .counter-order:has(.counter-order__summary-bar) {
+    padding-bottom: 6rem;
+  }
+  .counter-order__summary-bar {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--bop-space-3);
+    padding: var(--bop-space-3) var(--bop-space-4)
+      calc(var(--bop-space-3) + env(safe-area-inset-bottom, 0px));
+    border-top: 1px solid var(--bop-color-border-default);
+    background: var(--bop-color-surface-default);
+  }
+  .counter-order__summary-text {
+    display: grid;
+    font-size: 14px;
+    font-variant-numeric: tabular-nums;
+  }
+  .counter-order__summary-text strong {
+    font-size: 16px;
+  }
+  .counter-order__summary-bar .counter-order__primary {
+    min-width: 9rem;
+    min-height: 48px;
+  }
+  /* The option chooser opens as a sheet from the bottom, in view of the dish just tapped. */
+  .counter-order__choose {
+    width: 100%;
+    max-width: none;
+    margin: auto 0 0;
+    border-radius: 12px 12px 0 0;
+  }
+  .counter-order .counter-order__items {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* WP-2423 (staff-round-soldout): the guests' unsent items under the refusal, one plain row each
+   (hairlines, no boxes); an item that can't be sent carries its mark on the right. */
+.counter-order__table-cart {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.counter-order__table-cart li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 16px;
+  padding: 8px 0;
+  border-top: 1px solid var(--bop-color-row-divider);
+  font-size: 14px;
+}
+.counter-order__table-cart li:last-child {
+  border-bottom: 1px solid var(--bop-color-row-divider);
+}
+.counter-order__table-cart .order-accept-by {
+  margin-top: 0;
+}
+/* The action names the dishes it takes off, so it wraps instead of running past its edges. */
+.counter-order .counter-order__table-cart-action {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 16px;
+  white-space: normal;
+  text-align: center;
+}
+
+/* WP-2423 M35 (shared-table-cart-staff-round): the guests' unsent lines in the ticket, before
+   staff send: the same rows as the staff's own lines (hairlines, no boxes), each with a plain
+   two-way choice; the chosen one carries the accent, a line taken out reads muted. */
+.counter-order__guest-lines {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--bop-color-row-divider);
+}
+.counter-order .counter-order__guest-lines h3 {
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+.counter-order__guest-lines > p {
+  margin: 0;
+  font-size: 14px;
+}
+.counter-order .counter-order__guest-lines .counter-order__lines {
+  overflow: visible;
+}
+.counter-order__guest-lines li[data-decision="Remove"] .counter-order__line-name {
+  color: var(--bop-color-text-muted);
+}
+.counter-order__guest-lines li[data-decision="Remove"] .counter-order__guest-dish {
+  text-decoration: line-through;
+}
+.counter-order .counter-order__guest-choice {
+  justify-content: flex-end;
+  font-size: 14px;
+}
+.counter-order .counter-order__guest-choice .order-accept-by {
+  margin: 0;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+}
+.counter-order .counter-order__guest-choice > .bop-muted {
+  margin-inline-end: auto;
+}
+.counter-order__part {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* b63 (F39): after a table's round is sent, back to the floor is the one primary (accent fill);
+   another round and Orders are accent words — no white bordered button, no black link (v3).
+   Scoped under the actions row so the paid panel's ".card-actions > a" accent words don't win. */
+.counter-order .counter-order__charge .counter-order__sent-actions {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 8px 24px;
+}
+.counter-order .counter-order__charge .counter-order__sent-actions > .counter-order__sent-primary {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  padding: 0 24px;
+  border: 0;
+  border-radius: var(--bop-radius-control);
+  background: var(--bop-color-accent);
+  color: var(--bop-color-on-accent-fill);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.counter-order .counter-order__charge .counter-order__sent-actions > .counter-order__sent-step {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--bop-color-accent);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+/* ---- Batch 64 (v15 b63 live, F42): the resumed order's payment is the same panel as the first
+   charge (41:171): Take payment 20/600, the amount once at 28/600, its parts in grey, two steps,
+   14/400 grey labels and one full-width accent button. While it is open the menu and the order
+   being built step aside, as they do after a first send; Close brings them back unchanged. ---- */
+.counter-order__layout[data-resumed-charge] {
+  display: none;
+}
+.counter-order .counter-order__awaiting .counter-order__resumed-charge {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  max-width: 28rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.counter-order .counter-order__resumed-charge h3 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+.counter-order .counter-order__resumed-charge p {
+  margin: 0;
+}
+.counter-order .counter-order__resumed-charge > label {
+  display: grid;
+  gap: 4px;
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.counter-order .counter-order__resumed-charge :is(.field-hint, .bop-muted) {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+}
+.counter-order .counter-order__resumed-charge .card-actions {
+  flex-wrap: wrap;
+  gap: 8px 24px;
+}
+/* ---- Batch 65 (v15 b64 live, TM2 order 58): while one waiting order's payment is open, only
+   that order stays, led by its own row; the list's heading (still its region's name), paragraph
+   and other rows step aside, so the record button (52 px, as the first charge's) is on the first
+   screen at 1024x768 and 390x844. ---- */
+.counter-order .counter-order__awaiting[data-charging] > h2 {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.counter-order .counter-order__awaiting[data-charging] > p.bop-muted,
+.counter-order
+  .counter-order__awaiting[data-charging]
+  .counter-order__awaiting-list
+  > li:not([data-charging]) {
+  display: none;
+}
+.counter-order .counter-order__awaiting[data-charging] {
+  padding-top: 0;
+}
+.counter-order .counter-order__awaiting[data-charging] .counter-order__awaiting-list {
+  margin-top: 0;
+}
+.counter-order .counter-order__awaiting[data-charging] .counter-order__awaiting-list > li {
+  padding-top: 0;
+  border-top: 0;
+}
+.counter-order .counter-order__awaiting .counter-order__resumed-charge .counter-order__primary {
+  width: 100%;
+  min-height: 52px;
+}
+/* zh-Hans 取消/关闭 drew a 28 px wide target: every text button keeps 44 x 44. */
+.counter-order :is(.counter-order__danger-text, .counter-order__accent-text) {
+  min-width: 44px;
+}
+
+/* Batch 65: a table's round brought back from this device: one plain line, dark 14/400. */
+.counter-order .counter-order__round-back {
+  margin: 0 0 var(--bop-space-3);
+  color: var(--bop-color-text);
+  font-size: 14px;
+  font-weight: 400;
+}

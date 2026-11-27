@@ -1,283 +1,4165 @@
-import { AppFrame, StatePanel } from "@bop-rms/ui";
-import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router";
+import { sentences, wordGap } from "./word-gap.js";
+import { tablesOpenTableState } from "./tables-open-table.js";
 import {
-  parseStaffOrderEntryView,
-  StaffOrderEntryClientError,
-  unavailableStaffOrderEntryClient,
-  type StaffOrderEntryClientErrorCode,
-  type StaffOrderEntryProjectionClient,
-  type StaffOrderEntryView,
+  t,
+  saidTable,
+  listSeparator,
+  contentName,
+  forgetKeptThroughLanguageSwitch,
+  keepThroughLanguageSwitch,
+  takeKeptThroughLanguageSwitch,
+  currentLanguage,
+} from "./i18n/i18n.js";
+import { SlowWaitNotice } from "./slow-wait.js";
+import { noAccessHeading, pageAccessDeniedText } from "./access-denied.js";
+import { NoAccessNotice } from "./NoAccessNotice.js";
+import { StatePanel } from "@bop-rms/ui";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useStaffSessionLive } from "./staff-session-reads.js";
+import { Link, useLocation, useSearchParams } from "react-router";
+import { createDiningSessionClient } from "./dining-session-client.js";
+import {
+  createTableCartClient,
+  TableCartError,
+  type TableCart,
+  type TableCartLine,
+} from "./table-cart-client.js";
+import { validSlipReference } from "./CardMachineRefundAction.js";
+import { orderMoney } from "./order-money.js";
+import { serviceOperationReference } from "./service-control-client.js";
+import { Freshness, storeTime } from "./StoreTime.js";
+import { WorkspacePage } from "./WorkspacePage.js";
+import { CounterAwaitingPayment } from "./CounterAwaitingPayment.js";
+import { CounterCancelAction } from "./CounterCancelAction.js";
+import { CashTenderFields, cashTender } from "./CashTenderFields.js";
+import { loadOftenOrdered, recordOrdered } from "./counter-often-ordered.js";
+import {
+  clearUnansweredCounterSend,
+  keepUnansweredCounterSend,
+  loadUnansweredCounterSend,
+  paperPaymentDigest,
+  type UnansweredCounterSend,
+} from "./counter-unanswered-send.js";
+import {
+  paidAtDayNote,
+  paidAtInstant,
+  paidAtRefusal,
+  payErrorText,
+  paperPaymentProblem,
+  payIntentKey,
+  paymentUrgentMinutes,
+  paymentWindowNotice,
+  counterPayByText,
+} from "./counter-payment.js";
+import { cashTotalMinor, createTableCheckoutClient } from "./table-checkout-client.js";
+import { tableFactsFromBill } from "./table-order-facts.js";
+import { tableSettled } from "./table-needs.js";
+import {
+  staffRoundOffer,
+  staffRoundRefusedText,
+  type StaffRoundOffer,
+} from "./staff-round-offer.js";
+import type { StaffDiningTable } from "./dining-session-client.js";
+import {
+  CounterOrderClientError,
+  counterMenuFamilies,
+  counterMenuSearch,
+  createCounterOrderClient,
+  type CounterMenu,
+  type CounterMenuItem,
+  type CounterMenuFamily,
+  type CounterMenuRule,
+  type CounterTip,
+  type PlacedCounterOrder,
+  type SlipConfirmation,
+  type TableCartItem,
 } from "./staff-order-entry.js";
+import { PaperSlipConfirm } from "./PaperSlipConfirm.js";
+import {
+  keptConfirmationOf,
+  paidNoteFrom,
+  type KeptConfirmation,
+  type PaidNoteSource,
+  type RemovedSource,
+} from "./staff-order-kept-confirmation.js";
+import { useStoreBusinessDay } from "./StoreBusinessDay.js";
+import {
+  clearStaffRoundDraft,
+  keepStaffRoundDraft,
+  loadStaffRoundDraft,
+  staffRoundBackOf,
+  staffRoundIsForParty,
+  startingStaffRound,
+  type StaffRoundBack,
+} from "./staff-round-draft.js";
 
-type State =
-  | { readonly kind: "Loading" | StaffOrderEntryClientErrorCode }
-  | { readonly kind: "Found"; readonly view: StaffOrderEntryView };
+export { paidAtInstant, payErrorText, paymentUrgentMinutes, paymentWindowNotice };
 
-export function StaffOrderEntryState({
-  state,
+const cad = (amountMinor: string) => orderMoney({ amountMinor, currencyCode: "CAD" });
+
+interface Line {
+  readonly key: string;
+  readonly item: CounterMenuItem;
+  readonly quantity: number;
+  readonly options: readonly { optionReference: string; name: string; quantity: number }[];
+  /** WP-2423 Q7 slice 2 / M53: the guest's note for the kitchen (table rounds and counter). */
+  readonly note?: string | null;
+}
+
+/**
+ * WP-2423 M53: the counter order's lines as sent: a line's kitchen note goes with it, and a line
+ * without one sends no note field at all.
+ */
+export function counterOrderLines(lines: readonly Line[]) {
+  return lines.map((line) => {
+    const sent = {
+      sellableReference: line.item.sellableReference,
+      quantity: line.quantity,
+      optionSelections: line.options.map((option) => ({
+        optionReference: option.optionReference,
+        quantity: option.quantity,
+      })),
+    };
+    const note = line.note ?? null;
+    return note === null ? sent : { ...sent, customerNote: note };
+  });
+}
+
+/** The same dish as sent: its sellable, its choices and its kitchen note. */
+function sameDishKey(line: Line): string {
+  return JSON.stringify([
+    line.item.sellableReference,
+    [...line.options]
+      .map((option) => [option.optionReference, option.quantity] as const)
+      .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] - b[1])),
+    line.note ?? null,
+  ]);
+}
+/** A cart as sent: its dishes and their quantities, in any order. */
+export function sentDishesKey(lines: readonly Line[]): string {
+  const totals = new Map<string, number>();
+  for (const line of lines)
+    totals.set(sameDishKey(line), (totals.get(sameDishKey(line)) ?? 0) + line.quantity);
+  return JSON.stringify([...totals].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)));
+}
+/**
+ * b11 review: the cart without the dishes already in the order an earlier send of it placed (that
+ * send's lines, quantity by quantity), so sending again never orders or charges them twice.
+ */
+export function withoutDishesSent(lines: readonly Line[], sent: readonly Line[]): readonly Line[] {
+  const left = new Map<string, number>();
+  for (const line of sent)
+    left.set(sameDishKey(line), (left.get(sameDishKey(line)) ?? 0) + line.quantity);
+  const kept: Line[] = [];
+  for (const line of lines) {
+    const key = sameDishKey(line);
+    const taken = Math.min(left.get(key) ?? 0, line.quantity);
+    left.set(key, (left.get(key) ?? 0) - taken);
+    if (line.quantity > taken) kept.push({ ...line, quantity: line.quantity - taken });
+  }
+  return kept;
+}
+
+/**
+ * b11 review: "Already ordered as order N" at the counter, with what happened to the cart: every
+ * dish was in order N (taken off), some were (taken off, the rest can be sent as a new order), or
+ * this tablet can't tell which (staff take them off before sending). A paper send also says its
+ * slip was cleared, so it is never recorded twice.
+ */
+export function alreadyOrderedCartText(
+  orderNumber: string | null,
+  cart: "AllInOrder" | "SomeLeft" | "Unknown",
+  paperCleared: boolean,
+): string {
+  const main =
+    orderNumber === null
+      ? cart === "AllInOrder"
+        ? t(
+            "These dishes are already in an order, so they were taken off this list. Nothing new was charged or recorded. Open it in Orders.",
+          )
+        : cart === "SomeLeft"
+          ? t(
+              "Some of these dishes are already in an order; they were taken off this list. What is left isn't in any order yet: send it as a new order and take its own payment. Nothing new was charged or recorded.",
+            )
+          : t(
+              "Some of these dishes are already in an order, and this tablet can't tell which. Nothing new was charged or recorded. Find that order in Orders and take its dishes off this list before sending again.",
+            )
+      : cart === "AllInOrder"
+        ? t(
+            "Already ordered as order {number}: every dish on this list is in it, so they were taken off the list. Nothing new was charged or recorded. Open it in Orders.",
+            { number: orderNumber },
+          )
+        : cart === "SomeLeft"
+          ? t(
+              "Already ordered as order {number}. The dishes already in it were taken off this list; what is left isn't in any order yet: send it as a new order and take its own payment. Nothing new was charged or recorded.",
+              { number: orderNumber },
+            )
+          : t(
+              "Already ordered as order {number}, and this tablet can't tell which dishes on this list are in it. Nothing new was charged or recorded. Open order {number2} in Orders and take its dishes off this list before sending again.",
+              { number: orderNumber, number2: orderNumber },
+            );
+  return paperCleared
+    ? main +
+        wordGap() +
+        t(
+          "The paper slip goes with that order and was cleared here, so it is never recorded twice. If the same slip also paid for what is left, tick the paper order again and answer when asked.",
+        )
+    : main;
+}
+
+/** What staff see for an item: about its base price plus chosen options (the order total decides). */
+export function estimatedLineMinor(line: Line): bigint | null {
+  if (line.item.priceMinor === null) return null;
+  let each = BigInt(line.item.priceMinor);
+  for (const chosen of line.options) {
+    const option = line.item.rules
+      .flatMap((rule) => rule.options)
+      .find((candidate) => candidate.optionReference === chosen.optionReference);
+    if (option?.priceMinor === null || option === undefined) return null;
+    each += BigInt(option.priceMinor) * BigInt(chosen.quantity);
+  }
+  return each * BigInt(line.quantity);
+}
+
+/** WP-2423 M165: a ticket line whose price moved when the menu was read again. */
+export interface RepricedLine {
+  readonly name: string;
+  readonly beforeMinor: bigint;
+  readonly afterMinor: bigint;
+}
+
+/**
+ * WP-2423 M165 review: the chosen options of a line its item no longer offers (left the menu, or
+ * not offered now). They stay on the line, named, and the ticket cannot be sent until staff
+ * choose again, so the kitchen never gets a dish without the guest's instruction.
+ */
+export function withdrawnOptions(line: Line): readonly string[] {
+  const offered = new Map(
+    line.item.rules.flatMap((rule) =>
+      rule.options.map((option) => [option.optionReference, option] as const),
+    ),
+  );
+  return line.options
+    .filter((chosen) => {
+      const option = offered.get(chosen.optionReference);
+      return option === undefined || option.offeredNow === false;
+    })
+    .map((chosen) => chosen.name);
+}
+
+/**
+ * WP-2423 M165: the ticket's lines on the menu just read, so the subtotal staff see is the price
+ * the order is charged at. Each line takes its item's current price and options; a chosen option
+ * that is no longer offered is kept on the line (see withdrawnOptions), never dropped quietly. A
+ * line whose item left the menu keeps its last item, and the send refuses it by name as before.
+ */
+export function rebindLines<L extends Line>(
+  lines: readonly L[],
+  menu: CounterMenu,
+): { readonly lines: readonly L[]; readonly repriced: readonly RepricedLine[] } {
+  const items = new Map(
+    menu.sections.flatMap((section) =>
+      section.items.map((item) => [item.sellableReference, item] as const),
+    ),
+  );
+  const repriced: RepricedLine[] = [];
+  const next = lines.map((line) => {
+    const item = items.get(line.item.sellableReference);
+    if (item === undefined) return line;
+    // The chosen options named as the menu just read names them (v15 b12: in the language now).
+    const named = new Map(
+      item.rules.flatMap((rule) => rule.options.map((option) => [option.optionReference, option])),
+    );
+    const rebound = {
+      ...line,
+      item,
+      options: line.options.map((option) => {
+        const current = named.get(option.optionReference);
+        return current === undefined ? option : { ...option, name: current.name };
+      }),
+    };
+    const before = estimatedLineMinor(line),
+      after = estimatedLineMinor(rebound);
+    if (before !== null && after !== null && before !== after)
+      repriced.push({ name: item.name, beforeMinor: before, afterMinor: after });
+    return rebound;
+  });
+  return { lines: next, repriced };
+}
+
+/** How many of each option chosen by default (a choice guests can repeat, such as double pearls). */
+function defaultCounts(item: CounterMenuItem) {
+  return Object.fromEntries(
+    item.rules.flatMap((rule) =>
+      rule.options.map((option) => [option.optionReference, option.defaultQuantity || 1]),
+    ),
+  ) as Record<string, number>;
+}
+
+/** Defaults pre-chosen per option group; a group of one choice is a single pick. */
+function defaultChoices(item: CounterMenuItem) {
+  return Object.fromEntries(
+    item.rules.map((rule) => [
+      rule.bindingReference,
+      rule.options
+        .filter((option) => option.selectedByDefault)
+        .slice(0, Math.max(rule.maximumSelections, 0))
+        .map((option) => option.optionReference),
+    ]),
+  ) as Record<string, string[]>;
+}
+
+/**
+ * Batch 63 (F44): what is still to choose before the dish can be added ("Still to choose: Sugar,
+ * Ice"); empty once every group has its minimum.
+ */
+export function missingChoices(
+  item: CounterMenuItem,
+  choices: Record<string, string[]>,
+  counts: Readonly<Record<string, number>> = {},
+): string {
+  const missing = item.rules
+    .filter(
+      (rule) => chosenInRule(choices[rule.bindingReference] ?? [], counts) < rule.minimumSelections,
+    )
+    .map((rule) => rule.name);
+  return missing.length === 0
+    ? ""
+    : t("Still to choose: {groups}", { groups: missing.join(listSeparator()) });
+}
+
+/** Batch 63 (F44, CK-17): a − n + stepper of 44 px targets, so a tablet never opens a keyboard. */
+function Stepper({
+  label,
+  name,
+  value,
+  min,
+  max,
+  onChange,
 }: {
-  readonly state: Exclude<State["kind"], "Found">;
+  readonly label: string;
+  readonly name: string;
+  readonly value: number;
+  readonly min: number;
+  readonly max: number;
+  readonly onChange: (value: number) => void;
 }) {
-  const values: Record<typeof state, readonly [string, string, "neutral" | "error" | "offline"]> = {
-    Loading: ["Loading", "Loading the authorized Staff Order Entry context…", "neutral"],
-    PermissionDenied: [
-      "Permission denied",
-      "Both Staff Ordering permissions and Store scope are required.",
-      "error",
-    ],
-    NotFound: [
-      "Context unavailable",
-      "The Store or ordering context is not available in this scope.",
-      "neutral",
-    ],
-    FeatureDisabled: [
-      "Staff ordering disabled",
-      "Staff Order Entry is not enabled for this Store.",
-      "neutral",
-    ],
-    Stale: [
-      "Ordering context is stale",
-      "Refresh Menu, Cart, Quote and eligibility evidence before continuing.",
-      "offline",
-    ],
-    Conflict: [
-      "Cart changed",
-      "Recover the current Cart version and Quote before retrying.",
-      "offline",
-    ],
-    CommandFailed: [
-      "Command failed",
-      "No Cart, Order, Batch or Payment success is assumed.",
-      "error",
-    ],
-    Offline: [
-      "Offline read-only",
-      "Cached context cannot submit an Order or start Terminal payment.",
-      "offline",
-    ],
-    Unavailable: [
-      "Staff Order Entry unavailable",
-      "The authorized shared-contract BFF is not connected.",
-      "error",
-    ],
-  };
-  const value = values[state];
   return (
-    <StatePanel heading={value[0]} tone={value[2]} status>
-      <p>{value[1]}</p>
-      <Link to="/app">Return to Merchant Home</Link>
-    </StatePanel>
+    <div className="counter-order__stepper" role="group" aria-label={label}>
+      <span className="counter-order__stepper-label" aria-hidden="true">
+        {label}
+      </span>
+      <button
+        type="button"
+        disabled={value <= min}
+        aria-label={t("One less {name}", { name })}
+        onClick={() => onChange(value - 1)}
+      >
+        −
+      </button>
+      <output aria-live="polite">{value}</output>
+      <button
+        type="button"
+        disabled={value >= max}
+        aria-label={t("One more {name}", { name })}
+        onClick={() => onChange(value + 1)}
+      >
+        +
+      </button>
+    </div>
   );
 }
 
-const formatMoney = (amountMinor: number) => `CAD ${(amountMinor / 100).toFixed(2)}`;
+/** The group's limit counts each repeat of a choice (two of pearls is two of "at most 3"). */
+const chosenInRule = (choices: readonly string[], counts: Readonly<Record<string, number>>) =>
+  choices.reduce((sum, reference) => sum + (counts[reference] ?? 1), 0);
+/** The group's rule in the words guests see: "Required", "Optional · up to 3", "Choose 1 to 2". */
+export function staffChoiceText(
+  rule: Pick<CounterMenuRule, "minimumSelections" | "maximumSelections">,
+) {
+  const { minimumSelections: min, maximumSelections: max } = rule;
+  if (min === max) return max === 1 ? t("Required") : t("Required · choose {max}", { max });
+  if (min === 0) return max === 1 ? t("Optional") : t("Optional · up to {max}", { max });
+  return t("Choose {min} to {max}", { min, max });
+}
+/**
+ * WP-2423 item 3b: how many of one chosen option staff may enter — its own limit, or what the
+ * group's total leaves after the other choices, whichever is lower (never below one).
+ */
+export function repeatLimit(
+  rule: CounterMenuRule,
+  optionReference: string,
+  choices: readonly string[],
+  counts: Readonly<Record<string, number>>,
+) {
+  const option = rule.options.find((candidate) => candidate.optionReference === optionReference);
+  if (option === undefined) return 1;
+  const others = chosenInRule(
+    choices.filter((reference) => reference !== optionReference),
+    counts,
+  );
+  return Math.max(1, Math.min(option.maximumQuantity, rule.maximumSelections - others));
+}
+export function choicesComplete(
+  item: CounterMenuItem,
+  choices: Record<string, string[]>,
+  counts: Readonly<Record<string, number>> = {},
+) {
+  return item.rules.every((rule) => {
+    const chosen = choices[rule.bindingReference] ?? [];
+    const picked = chosenInRule(chosen, counts);
+    return (
+      picked >= rule.minimumSelections &&
+      picked <= rule.maximumSelections &&
+      chosen.every((reference) => {
+        const option = rule.options.find((candidate) => candidate.optionReference === reference);
+        const count = counts[reference] ?? 1;
+        return (
+          option !== undefined &&
+          Number.isSafeInteger(count) &&
+          count >= 1 &&
+          count <= option.maximumQuantity
+        );
+      })
+    );
+  });
+}
 
-export function StaffOrderEntryScreen({ view }: { readonly view: StaffOrderEntryView }) {
-  const [query, setQuery] = useState("");
-  const [section, setSection] = useState("All");
-  const [availability, setAvailability] = useState("AvailableNow");
-  const sections = useMemo(
-    () => [...new Set(view.menuItems.map((item) => item.sectionCode))].sort(),
-    [view.menuItems],
+const menuError: Record<string, [string, string]> = {
+  PermissionDenied: [noAccessHeading, pageAccessDeniedText],
+  TableUnavailable: [
+    t("This table can't take an order now"),
+    t(
+      "It may be marked unavailable, or it may not be set up for orders yet. Check it on the Tables page.",
+    ),
+  ],
+  TableHasNoQr: [
+    t("This table has no table QR code yet"),
+    t(
+      "Orders for a table use its code. Ask a manager to create one on the Table QR codes page, then take the order.",
+    ),
+  ],
+  TableUnknown: [t("Table not found"), t("Open the table from the Tables page to take its order.")],
+  Unavailable: [
+    t("The menu could not be loaded"),
+    t(
+      "Try again. If the system stays down, take the order on paper and record it here afterwards.",
+    ),
+  ],
+};
+
+/** WP-2423 (staff-round-soldout): the guests' items staff may take off (can't be served now). */
+export function tableCartUnsellable(items: readonly TableCartItem[]): readonly TableCartItem[] {
+  return items.filter(
+    (item) => item.standing === "Unavailable" || item.standing === "OptionsChanged",
   );
-  const normalized = query.trim().toLocaleUpperCase();
-  const items = view.menuItems.filter(
-    (item) =>
-      (section === "All" || item.sectionCode === section) &&
-      (availability === "All" || item.availability === availability) &&
-      (normalized.length === 0 ||
-        item.code.includes(normalized) ||
-        item.localizedName.toLocaleUpperCase().includes(normalized)),
+}
+/** The items' menu names as staff read them ("Plum juice, Noodles" / "酸梅汤、面"). */
+export function tableCartNames(items: readonly TableCartItem[]): string {
+  return items.map((item) => item.name).join(listSeparator());
+}
+/** WP-2423 M06: what staff tell the guests after their unavailable dishes left the round. */
+export function tableCartRemovedNote(items: readonly TableCartItem[]): string | null {
+  if (items.length === 0) return null;
+  const names = tableCartNames(items);
+  return items.length === 1
+    ? t("Tell the guests: {names} isn't available now, so it was taken off their order.", { names })
+    : t("Tell the guests: {names} aren't available now, so they were taken off their order.", {
+        names,
+      });
+}
+/** WP-2423 (staff-round-soldout): what a guest's item is marked with, or null when it can be sent. */
+export function tableCartMark(item: TableCartItem): string | null {
+  if (item.standing === "Unavailable") return t("Sold out or off the menu now");
+  if (item.standing === "OptionsChanged") return t("Choices changed on the menu");
+  if (item.standing === "Short")
+    return (item.available ?? 0) > 0
+      ? t("Only {count} left", { count: item.available ?? 0 })
+      : t("None left");
+  return null;
+}
+
+/**
+ * WP-2423 M35 (shared-table-cart-staff-round): one of the guests' unsent lines as the staff round
+ * screen shows it: named and priced from the menu staff hold (the dish's own name when it is on no
+ * current menu), whether it can be sent now, and which phone added it.
+ */
+export interface GuestCartLine {
+  readonly cartItemReference: string;
+  readonly name: string;
+  readonly options: string;
+  readonly quantity: number;
+  /** About the line's price before tax from the menu; null when the menu can't say. */
+  readonly estimateMinor: bigint | null;
+  /** Sold out, off the menu, or one of its choices no longer offered: it can't be sent. */
+  readonly unsellable: boolean;
+  readonly phoneNumber: number | null;
+  readonly phoneLeft: boolean;
+}
+export type GuestLineDecision = "Send" | "Remove";
+
+export function guestCartLines(
+  cart: TableCart | null,
+  menu: CounterMenu | null,
+): readonly GuestCartLine[] {
+  if (cart === null) return [];
+  const items = new Map(
+    (menu?.sections ?? []).flatMap((section) =>
+      section.items.map((item) => [item.sellableReference, item] as const),
+    ),
   );
-  const readOnly = view.freshness !== "Current" || view.partial;
+  return cart.lines.map((line: TableCartLine) => {
+    const item = items.get(line.sellableReference);
+    const offered = item?.rules.flatMap((rule) => rule.options) ?? [];
+    const options = line.optionSelections.map((selection) => ({
+      selection,
+      option: offered.find((option) => option.optionReference === selection.optionReference),
+    }));
+    const unsellable =
+      item === undefined ||
+      !item.available ||
+      options.some(({ option }) => option === undefined || option.offeredNow === false);
+    return Object.freeze({
+      cartItemReference: line.cartItemReference,
+      name: item?.name ?? contentName(line.names) ?? t("A dish no longer on the menu"),
+      options: options
+        .map(({ option, selection }) =>
+          option === undefined
+            ? ""
+            : selection.quantity > 1
+              ? `${option.name} × ${selection.quantity}`
+              : option.name,
+        )
+        .filter((name) => name !== "")
+        .join(listSeparator()),
+      quantity: line.quantity,
+      estimateMinor:
+        item === undefined || unsellable
+          ? null
+          : estimatedLineMinor({
+              key: line.cartItemReference,
+              item,
+              quantity: line.quantity,
+              options: options.map(({ option, selection }) => ({
+                optionReference: selection.optionReference,
+                name: option?.name ?? "",
+                quantity: selection.quantity,
+              })),
+            }),
+      unsellable,
+      phoneNumber: line.phoneNumber,
+      phoneLeft: line.phoneLeft,
+    });
+  });
+}
+
+/** Why a line staff take out leaves (recorded with the removal; no extra tap). */
+export function guestRemovalReason(line: GuestCartLine): "CantMake" | "GuestLeft" | "GuestAsked" {
+  return line.unsellable ? "CantMake" : line.phoneLeft ? "GuestLeft" : "GuestAsked";
+}
+
+/** What staff tell the guests about the lines they took out with the round sent. */
+export function guestRemovedNote(removed: readonly GuestCartLine[]): string | null {
+  const cantMake = removed.filter((line) => line.unsellable);
+  const asked = removed.filter((line) => !line.unsellable);
+  const notes = [
+    cantMake.length === 0
+      ? null
+      : tableCartRemovedNote(
+          cantMake.map((line) => ({
+            cartItemReference: line.cartItemReference,
+            name: line.name,
+            quantity: line.quantity,
+            standing: "Unavailable" as const,
+            available: null,
+          })),
+        ),
+    asked.length === 0
+      ? null
+      : t("Removed from the guests' cart: {names}.", {
+          names: asked.map((line) => line.name).join(listSeparator()),
+        }),
+  ].filter((note): note is string => note !== null);
+  return notes.length === 0 ? null : notes.join(wordGap());
+}
+
+/** Who added a guest line, as staff say it ("Phone 2", "Phone 2 has left", "Staff"). */
+export function guestLineAdder(line: GuestCartLine): string {
+  if (line.phoneNumber === null) return t("Staff");
+  return line.phoneLeft
+    ? t("Phone {number} has left", { number: String(line.phoneNumber) })
+    : t("Phone {number}", { number: String(line.phoneNumber) });
+}
+
+export function placeErrorText(
+  error: CounterOrderClientError,
+  lines: readonly Line[],
+  table: string | null = null,
+  canCreateTableCode = false,
+) {
+  switch (error.code) {
+    case "TableCartHasItems": {
+      const value =
+        error.pendingItems.length > 0
+          ? ` (${error.pendingItems.map((item) => `${item.quantity} × ${item.name}`).join(listSeparator())})`
+          : "";
+      // WP-2423 (staff-round-soldout): too few left of a guest's item: only the guests change it
+      // (or, with none left, staff mark it sold out, and can then remove it).
+      const short = error.pendingItems.find((item) => item.standing === "Short");
+      if (error.tableCart !== null && short !== undefined)
+        return (short.available ?? 0) > 0
+          ? t(
+              "{name} has only {count} left. Ask the guests to lower it on their phone, then send again. Nothing was sent or charged.",
+              { name: short.name, count: short.available ?? 0 },
+            )
+          : t(
+              "{name} has none left. Ask the guests to remove it on their phone, or mark it sold out, then send again. Nothing was sent or charged.",
+              { name: short.name },
+            );
+      // WP-2423 (staff-round-soldout): a guest's item can't be served now; staff remove it.
+      const unsellable = tableCartUnsellable(error.pendingItems);
+      if (error.tableCart !== null && unsellable.length > 0) {
+        const names = tableCartNames(unsellable);
+        if (unsellable.length === 1)
+          return error.tableCart.guestsCanSend
+            ? t(
+                "Guests at this table have items in their shared cart that haven't been sent. {names} can't be served now. Remove it from their order, or ask the guests to change their order on their phone.",
+                { names },
+              )
+            : t(
+                "Guests at this table have items in their shared cart that haven't been sent. {names} can't be served now, and guests can no longer send after last orders. Remove it from their order to send this round.",
+                { names },
+              );
+        return error.tableCart.guestsCanSend
+          ? t(
+              "Guests at this table have items in their shared cart that haven't been sent. {names} can't be served now. Remove them from their order, or ask the guests to change their order on their phone.",
+              { names },
+            )
+          : t(
+              "Guests at this table have items in their shared cart that haven't been sent. {names} can't be served now, and guests can no longer send after last orders. Remove them from their order to send this round.",
+              { names },
+            );
+      }
+      // WP-2423 item 8 ⑦ (v15 finding t): staff add them to this round; asking the guests only
+      // while they can still send (not after last orders).
+      if (error.tableCart !== null)
+        return error.tableCart.guestsCanSend
+          ? t(
+              "Guests at this table have items in their shared cart that haven't been sent{value}. Add them to this round, or ask the guests to send or remove them on their phone.",
+              { value },
+            )
+          : t(
+              "Guests at this table have items in their shared cart that haven't been sent{value}, and guests can no longer send them after last orders. Add them to this round to order them.",
+              { value },
+            );
+      return t(
+        "Guests at this table have items in their shared cart that haven't been sent{value}. Ask them to send or remove those items on their phone, then send this order again.",
+        { value },
+      );
+    }
+    case "TableCheckoutInProgress":
+      return t(
+        "A guest at this table is ordering or paying on their phone. Wait a minute, then send again.",
+      );
+    case "TableUnavailable":
+      return t(
+        "{value} can't take an order now (marked unavailable, or it is checking out or being closed). Check the table on the Tables page.",
+        { value: table ?? "This table" },
+      );
+    // DEC-STAFF-ROUND-ONE-AT-A-TIME: two tablets sending for one table take turns.
+    case "TableBusy":
+      return t(
+        "Another staff member is sending a round for {value} right now. Nothing of this order was sent or charged, and it is still here: send it again in a moment.",
+        { value: table ?? t("this table") },
+      );
+    // v15 b12: the round's dishes stayed in the table's cart (or went out with another round).
+    case "DishesLeftAtTable":
+      return t(
+        "This round for {value} wasn't sent, but its dishes are still in the table's cart, or already went out with another round from the table. This order was cleared so nothing is sent twice. Check the table's unsent dishes above and its order, then send only what is still missing.",
+        { value: table ?? t("this table") },
+      );
+    case "TablePartyChanged":
+      // v15 staff-round-speed: an order left on this screen after its party left the table.
+      return t(
+        "The guests this order was taken for have left {value}, and the table has been cleared or seated again. Nothing was sent or charged. Check the order with the guests at the table now before sending it for them, or start over.",
+        { value: table ?? t("this table") },
+      );
+    case "TableHasNoQr":
+      return t(
+        "{value} has no table QR code, so orders can't be taken for it yet. Nothing was sent or charged. {value2}",
+        {
+          value: table ?? "This table",
+          value2: canCreateTableCode
+            ? "Create one on Table QR codes (it can be printed later), then send the order again."
+            : "Ask a manager to create one on the Table QR codes page, then send the order again.",
+        },
+      );
+    case "ItemUnavailable": {
+      const line = error.lineIndex === null ? undefined : lines[error.lineIndex];
+      // WP-2423 (staff-round-soldout): the dish is sold, the choices made for it no longer fit.
+      if (line && error.optionsChanged)
+        return t(
+          "{name}'s choices changed on the menu. Remove it, add it again with the new choices, then send. Nothing was sent or charged.",
+          { name: line.item.name },
+        );
+      // WP-2423: each item could be made on its own, but not together (they share an ingredient).
+      if (line && error.sharedStock)
+        return t(
+          "There isn't enough left to make {name} with the rest of this order (other items use the same ingredients). Remove {name2} or change the other items, then send again. Nothing was sent or charged.",
+          { name: line.item.name, name2: line.item.name },
+        );
+      return line
+        ? t(
+            "{name} can't be sold right now (sold out or off the menu). Remove it and send again. Nothing was sent or charged.",
+            { name: line.item.name },
+          )
+        : t(
+            "An item can't be sold right now (it may have just sold out). Check the order and send again. Nothing was sent or charged.",
+          );
+    }
+    case "ItemShort": {
+      // v15 run: name the short item and how many are left; the order stays as entered.
+      const line = error.lineIndex === null ? undefined : lines[error.lineIndex];
+      const left = error.available ?? 0;
+      if (line === undefined)
+        return t(
+          "An item has only {left} left. Remove it and add {left2} back, then send again. Nothing was sent or charged.",
+          { left: left, left2: left },
+        );
+      // WP-2423: short only because other items in the order use the same ingredients.
+      if (error.sharedStock)
+        return t(
+          "Only {left} {name} can be made with the rest of this order (other items use the same ingredients). Lower {name2} to {left2} or change the other items, then send again. Nothing was sent or charged.",
+          { left: left, name: line.item.name, name2: line.item.name, left2: left },
+        );
+      const options = (entry: Line) =>
+        JSON.stringify(
+          entry.options.map((option) => [option.optionReference, option.quantity]).sort(),
+        );
+      const ordered = lines
+        .filter(
+          (other) =>
+            other.item.sellableReference === line.item.sellableReference &&
+            options(other) === options(line),
+        )
+        .reduce((sum, other) => sum + other.quantity, 0);
+      return t(
+        "Only {left} {name} left, {ordered} in this order. Remove {name2} and add {left2} back, then send again. Nothing was sent or charged.",
+        { left: left, name: line.item.name, ordered: ordered, name2: line.item.name, left2: left },
+      );
+    }
+    // v15 batch-5 review: a paper order's paid-at refused before it was placed (nothing was sent).
+    case "TakenBeforeRecords":
+      return t(
+        "That paid-at time is before this store started recording sales in the system. Nothing was sent. Check the time on the paper slip, then send again.",
+      );
+    case "PaidAtOutOfRange":
+      return t(
+        "That paid-at time is later than now, or more than 3 days ago, by the system's clock. Nothing was sent. Check the time on the paper slip and this device's clock, then send again.",
+      );
+    // DEC-PAPER-SEND-IDEMPOTENT (b11): a paper slip is recorded once, on one order.
+    case "SlipAlreadyRecorded":
+      return error.placedOrderNumber !== null
+        ? t(
+            "This paper slip is already recorded with order {number}. Nothing was sent or recorded. If this is the same sale, it is already in order {number2}: don't send it again. If the same slip also paid for this order, or it's another slip with the same reference, answer below and it is sent.",
+            { number: error.placedOrderNumber, number2: error.placedOrderNumber },
+          )
+        : t(
+            "This paper slip is already recorded with another order. Nothing was sent or recorded. If this is the same sale, find it in Orders and don't send it again. If the same slip also paid for this order, or it's another slip with the same reference, answer below and it is sent.",
+          );
+    case "StoreNotTakingOrders":
+      return table !== null
+        ? t(
+            "The store is closed, so no new table orders can be taken now. A paper order taken earlier can still be entered under Paper order.",
+          )
+        : t(
+            "Pickup hours are over, so the counter can't take a new order now. A paper order taken earlier can still be entered under Paper order.",
+          );
+    case "TipsOff":
+      return t(
+        "Tips are turned off for this store, so nothing was sent or charged. Send it again with no tip.",
+      );
+    case "TipChoicesChanged":
+      return t(
+        "The store's tip choices just changed, so nothing was sent or charged. Choose the tip again and send.",
+      );
+    // WP-2423 item 13 ② (Owner 2026-11-05): only new guests stop; what is open carries on.
+    case "NewGuestsPaused":
+      return table !== null
+        ? t(
+            "New guests are paused for this restaurant by the platform, so no new table can be opened. Tables already seated carry on as usual: serve, take payment and refund. Ask the owner about it.",
+          )
+        : t(
+            "New guests are paused for this restaurant by the platform, so the counter can't take a new order. Nothing was sent or charged. Orders already placed carry on as usual: prepare, hand over and refund them. Ask the owner about it.",
+          );
+    case "CounterOrderingOff":
+      return t(
+        "Counter ordering is turned off for this store, so nothing was sent or charged. The owner can turn it back on in Store features.",
+      );
+    case "NotPriced":
+      return t("This order could not be priced. Check the items and options and send again.");
+    case "NotFinished":
+      return t("This order didn't go through and nothing was charged. Send it again.");
+    case "InProgress":
+      return t("This order is still being sent. Wait a moment, then send again to see it.");
+    case "PermissionDenied":
+      // WP-2423 batch 28: a table round says so (staff were told "counter orders" at a table).
+      return table !== null
+        ? t(
+            "You're signed out, or your role can't send table rounds. Sign in again or ask a manager. Sending the same round again never sends it twice.",
+          )
+        : t(
+            "Your role can't take counter orders. Ask the owner or a manager, or sign in as a staff member who can.",
+          );
+    case "OutcomeUnknown":
+      return t("No answer from the system. Send again — the same order is never created twice.");
+    case "NoPickupTimes":
+      return t(
+        "Pickup times have run out in the system, so no pickup order can be entered right now. Nothing was sent or charged. Take this order on paper and charge it on the card machine, then enter it under Paper order once pickup times are back. Tell a manager — Home shows the alert.",
+      );
+    // WP-2423 M03: these dishes went into an order already; never charge them a second time.
+    case "AlreadyOrdered":
+      // DEC-PAPER-SEND-IDEMPOTENT: a table round sent before is named by its table and order.
+      if (table !== null && error.placedOrderNumber !== null)
+        return t(
+          "This round for {table} was sent before, on order {number}. Its time to pay has ended, so it was taken off and nothing was charged. Nothing new was sent. Open it in Orders.",
+          {
+            table:
+              error.placedTableLabel === null
+                ? table
+                : t("Table {tableLabel}", { tableLabel: saidTable(error.placedTableLabel) }),
+            number: error.placedOrderNumber,
+          },
+        );
+      return error.placedOrderNumber !== null
+        ? t("Already ordered as order {number}. Nothing new was charged. Open it in Orders.", {
+            number: error.placedOrderNumber,
+          })
+        : t("These items are already in an order. Nothing new was charged. Open it in Orders.");
+    case "SystemProblem":
+      return table !== null
+        ? t(
+            "The system couldn't send this round for {table} (a problem on our side, not with the order). Nothing was sent to the kitchen or charged. Send it once more. If it fails again, take the order on paper, charge it on the card machine and enter it under Paper order later. Home shows any alert.",
+            { table: table },
+          )
+        : t(
+            "The system couldn't place this order (a problem on our side, not with the order). Nothing was charged. Send it once more. If it fails again, take the order on paper, charge it on the card machine and enter it under Paper order later. Home shows any alert.",
+          );
+    default:
+      // WP-2423: e.g. no order can be priced right now; Home shows the alert and what to do.
+      return t(
+        "The order could not be sent. Check the order and try again. If it keeps failing, check Home for an alert and take the order on paper.",
+      );
+  }
+}
+
+/** v15 run: how often the counter menu re-reads what the store can sell while staff build an order. */
+export const MENU_REFRESH_MS = 30_000;
+/** WP-2423 M35: how often the table's unsent guest lines are read while staff build a round. */
+export const GUEST_CART_REFRESH_MS = 5_000;
+
+/**
+ * WP-2423 Q7 (OPS-ORDER-ENTRY, DEC-COUNTER-PAYMENT-RECORD): staff take a pickup order at the
+ * counter for a customer without a phone, or enter a paper order taken while the system was down.
+ * The order uses the same menu, sold-out state, prices and tax as the customer app; the store's
+ * own card machine takes the payment (no cash) and staff record it here.
+ */
+/**
+ * WP-2423 (staff-round-soldout): the guests' unsent items, each marked when it can't be sent, and
+ * what staff can do with them: add them to this round, or first take off the ones that can't be
+ * served (the server removes only those, and only while they still can't be sold). An item with
+ * too few left is the guests' to change, so it offers nothing.
+ */
+export function TableCartOfferActions({
+  offer,
+  disabled,
+  onSend,
+}: {
+  readonly offer: { readonly items: readonly TableCartItem[] };
+  readonly disabled: boolean;
+  readonly onSend: (removeUnavailable: readonly TableCartItem[]) => void;
+}) {
+  const unsellable = tableCartUnsellable(offer.items);
+  const short = offer.items.some((item) => item.standing === "Short");
+  const names = tableCartNames(unsellable);
   return (
-    <AppFrame
-      title="Staff Order Entry"
-      description="OPS-ORDER-ENTRY · merchant_staff_order_entry_v1"
-    >
-      <header className="screen-heading">
-        <div>
-          <p className="bop-eyebrow">Fixed Store / named Staff / shared Ordering truth</p>
-          <h2>
-            {view.storeLabel} · {view.serviceMode}
-          </h2>
-          <p>
-            {view.actorLabel} · channel {view.sourceChannel} · {view.freshness} · {view.asOfUtc}
-          </p>
-        </div>
-        <button disabled>Create staff-scoped Cart</button>
-      </header>
-      {readOnly ? (
-        <StatePanel heading="Read-only dependency context" tone="offline" status>
-          <p>
-            Menu, Quote, Dining, allergen and Payment evidence must be current before a command.
-          </p>
-        </StatePanel>
+    <>
+      {offer.items.length > 0 ? (
+        <ul className="counter-order__table-cart" aria-label={t("Guests' items not sent yet")}>
+          {offer.items.map((item) => {
+            const mark = tableCartMark(item);
+            return (
+              <li key={item.cartItemReference}>
+                <span>
+                  {t("{quantity} × {name}", { quantity: item.quantity, name: item.name })}
+                </span>
+                {mark !== null ? (
+                  <span className="order-accept-by" data-tier="warning">
+                    {mark}
+                  </span>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
       ) : null}
-      <section className="detail-section" aria-labelledby="staff-menu">
-        <h3 id="staff-menu">Public-effective Menu and Sellable configurator</h3>
-        <p className="bop-muted">
-          Menu snapshot {view.menuSnapshotReference}. Price and tax are server-derived; no override
-          is accepted.
-        </p>
-        <div className="list-filters" role="search">
-          <label>
-            Localized item / code
-            <input value={query} onChange={(event) => setQuery(event.currentTarget.value)} />
-          </label>
-          <label>
-            Section
-            <select value={section} onChange={(event) => setSection(event.currentTarget.value)}>
-              <option>All</option>
-              {sections.map((value) => (
-                <option key={value}>{value}</option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Availability
-            <select
-              value={availability}
-              onChange={(event) => setAvailability(event.currentTarget.value)}
-            >
-              <option>AvailableNow</option>
-              <option>All</option>
-              <option>Unavailable</option>
-            </select>
-          </label>
-          <label>
-            Service mode
-            <select value={view.serviceMode} disabled>
-              <option>{view.serviceMode}</option>
-            </select>
-          </label>
-        </div>
-        {items.length === 0 ? (
-          <StatePanel heading="No matching Sellables" status>
-            <p>No public-effective item matches the current filters.</p>
-          </StatePanel>
-        ) : (
-          <div className="store-card-grid">
-            {items.map((item) => (
-              <article className="store-card" key={item.sellableReference}>
-                <header>
-                  <div>
-                    <p className="bop-eyebrow">
-                      {item.sectionCode} · {item.code}
-                    </p>
-                    <h3>{item.localizedName}</h3>
-                  </div>
-                  <strong>{formatMoney(item.configuredPrice.amountMinor)}</strong>
-                </header>
-                <p>
-                  {item.availability} · allergen {item.allergenRequirement}
-                </p>
-                <button disabled>Configure and add</button>
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
-      <div className="detail-grid">
-        <section className="detail-section">
-          <h3>Staff Cart / canonical Quote</h3>
-          {view.cart === null ? (
-            <p>No staff Cart has been created.</p>
-          ) : (
-            <dl>
-              <div>
-                <dt>Cart / version</dt>
-                <dd>
-                  {view.cart.cartReference} · {view.cart.cartVersion}
-                </dd>
-              </div>
-              <div>
-                <dt>Lines</dt>
-                <dd>{view.cart.lineCount}</dd>
-              </div>
-              <div>
-                <dt>Quote</dt>
-                <dd>
-                  {view.cart.quoteStatus} · {view.cart.quoteReference ?? "Missing"}
-                </dd>
-              </div>
-              <div>
-                <dt>Total</dt>
-                <dd>
-                  {view.cart.total
-                    ? formatMoney(view.cart.total.amountMinor)
-                    : "Awaiting server Quote"}
-                </dd>
-              </div>
-            </dl>
-          )}
-          <div className="card-actions">
-            <button disabled>Requote</button>
-            <button disabled>Submit Order / Batch idempotently</button>
-          </div>
-        </section>
-        <section className="detail-section">
-          <h3>Dining Session / verified Customer reference</h3>
-          <p>
-            Dining eligibility: {view.diningSession.eligibility} ·{" "}
-            {view.diningSession.sessionReference ?? "No session attached"}
-          </p>
-          <p>
-            Customer reference:{" "}
-            {view.customerReference.verified
-              ? view.customerReference.maskedReference
-              : "Not attached"}
-          </p>
-          <button disabled>Attach eligible Dining Session</button>
-        </section>
-      </div>
-      <section className="detail-section">
-        <h3>Structured allergen review</h3>
+      {short ? null : (
         <p>
-          Status: {view.allergenReview}. No allergy / health free text is displayed or stored by
-          this screen.
+          <button
+            type="button"
+            className="counter-order__primary counter-order__table-cart-action"
+            disabled={disabled}
+            onClick={() => onSend(unsellable)}
+          >
+            {unsellable.length === 0
+              ? t("Add them to this round")
+              : unsellable.length === offer.items.length
+                ? t("Remove {names} and send this round", { names })
+                : t("Remove {names} and add the rest to this round", { names })}
+          </button>
         </p>
-        <button disabled>Record Staff allergen assistance</button>
-      </section>
-      <section className="detail-section">
-        <h3>Cashless Terminal handoff</h3>
-        <p>
-          Terminal status: {view.terminalStatus}. A start command may report Pending only; Provider
-          truth owns finality.
-        </p>
-        <button disabled>Start Terminal payment</button>
-      </section>
-    </AppFrame>
+      )}
+    </>
   );
+}
+
+/**
+ * v15 b12: the order being taken, kept across the language switch (the page reloads for it) in
+ * this tab only: its dishes, the tip and the party it was taken for. Null when nothing usable.
+ * Batch 66: also the business day it was taken on and, for a round brought back from this device,
+ * the kitchen notes still to add again, so the party, day and reminder hold through the switch.
+ */
+interface KeptDraft {
+  readonly lines: readonly Line[];
+  readonly tip: string;
+  readonly customTip: string;
+  readonly party: { readonly session: string | null } | null;
+  readonly businessDate?: string | null;
+  readonly roundBack?: StaffRoundBack | null;
+}
+/** One of the order's lines as the language switch kept it. */
+function isKeptLine(line: unknown): line is Line {
+  const entry = line as Partial<Line> | null;
+  return (
+    entry !== null &&
+    typeof entry === "object" &&
+    typeof entry.key === "string" &&
+    typeof entry.item?.sellableReference === "string" &&
+    typeof entry.item.name === "string" &&
+    Array.isArray(entry.item.rules) &&
+    Number.isSafeInteger(entry.quantity) &&
+    (entry.quantity ?? 0) >= 1 &&
+    Array.isArray(entry.options)
+  );
+}
+/** Batch 67: what staff tell the guests about their dishes taken out, said in today's language. */
+function removedNoteFrom(source: RemovedSource | null): string | null {
+  if (source === null) return null;
+  if (source.kind === "TableCart")
+    return tableCartRemovedNote(
+      source.names.map((name) => ({
+        cartItemReference: "",
+        name,
+        quantity: 1,
+        standing: "Unavailable" as const,
+        available: null,
+      })),
+    );
+  return guestRemovedNote(
+    source.lines.map((line) => ({
+      cartItemReference: "",
+      name: line.name,
+      options: "",
+      quantity: 1,
+      estimateMinor: null,
+      unsellable: line.unsellable,
+      phoneNumber: null,
+      phoneLeft: false,
+    })),
+  );
+}
+/** Batch 67: a sent round's or paid order's confirmation as the language switch keeps it. */
+export function keptSentOf(value: unknown): KeptConfirmation<Line> | null {
+  return keptConfirmationOf(value, isKeptLine);
+}
+
+export function keptDraftOf(value: unknown): KeptDraft | null {
+  if (value === null || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  const party = raw.party as { session?: unknown } | null | undefined;
+  if (
+    !Array.isArray(raw.lines) ||
+    raw.lines.length === 0 ||
+    raw.lines.length > 200 ||
+    typeof raw.tip !== "string" ||
+    typeof raw.customTip !== "string" ||
+    !(
+      party === null ||
+      (typeof party === "object" &&
+        party !== undefined &&
+        (party.session === null || typeof party.session === "string"))
+    ) ||
+    !raw.lines.every(isKeptLine) ||
+    !(
+      raw.businessDate === undefined ||
+      raw.businessDate === null ||
+      typeof raw.businessDate === "string"
+    )
+  )
+    return null;
+  const lines = raw.lines as Line[];
+  const roundBack = staffRoundBackOf(raw.roundBack, lines);
+  return {
+    lines,
+    tip: raw.tip,
+    customTip: raw.customTip,
+    party: party === null ? null : { session: (party?.session as string | null) ?? null },
+    ...(raw.businessDate === undefined ? {} : { businessDate: raw.businessDate }),
+    ...(roundBack === undefined ? {} : { roundBack }),
+  };
+}
+
+/**
+ * Batch 63 (F41): the dish's Chinese name, shown under the English one in the English UI (the
+ * Chinese UI already shows it as the name). Null in the Chinese UI or when the Store has none.
+ */
+export function chineseName(otherName: string | undefined): string | null {
+  if (currentLanguage() !== "en" || otherName === undefined) return null;
+  const name = otherName.trim();
+  return name === "" ? null : name;
+}
+
+/** The Chinese name of a sized drink's product: its first size's name before " — ". */
+function familyOtherName(family: CounterMenuFamily): string | undefined {
+  const other = family.sizes[0]?.item.otherName;
+  if (other === undefined || family.sizes.length === 1) return other;
+  const index = other.indexOf(" — ");
+  return index > 0 ? other.slice(0, index) : other;
 }
 
 export function StaffOrderEntryPage({
-  client = unavailableStaffOrderEntryClient,
+  storeLabel,
+  storeReference = storeLabel,
+  csrf,
+  timeZone,
+  tableQrHref,
+  fetcher,
 }: {
-  readonly client?: StaffOrderEntryProjectionClient;
+  readonly storeLabel: string;
+  /** Which Store this tablet's often-ordered dishes belong to. */
+  readonly storeReference?: string;
+  readonly csrf: string;
+  readonly timeZone?: string | undefined;
+  /** Where staff who can create table QR codes do so (same rule as the Tables page), if allowed. */
+  readonly tableQrHref?: string | undefined;
+  readonly fetcher?: typeof fetch | undefined;
 }) {
-  const [state, setState] = useState<State>({ kind: "Loading" });
+  const client = useMemo(() => createCounterOrderClient(csrf, fetcher), [csrf, fetcher]);
+  // WP-2423 Q7 slice 2 (DEC-STAFF-DINE-IN-ROUND): opened from the Tables page for one table.
+  const [searchParams] = useSearchParams();
+  const requestedTable = searchParams.get("table");
+  const tableReference =
+    requestedTable !== null &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(requestedTable)
+      ? requestedTable
+      : null;
+  const tableMode = requestedTable !== null;
+  const [tableLabel, setTableLabel] = useState<string | null>(null);
+  // b63 (F39): Tables opened this page while a join code it had handed out was on screen, or
+  // (review) the Tables list says the table has a join code nobody used yet, from any device.
+  const location = useLocation();
+  const [unusedJoinCode, setUnusedJoinCode] = useState(false);
+  const joinCodeShown =
+    unusedJoinCode ||
+    (location.state as { readonly joinCodeShown?: unknown } | null)?.joinCodeShown === true;
+  // DEC-DINE-IN-PAY-LATER: the table pays once at the end — no tip and no charge per round.
+  const [tablePaysLater, setTablePaysLater] = useState(false);
+  const [menu, setMenu] = useState<
+    | { kind: "Loading" }
+    | { kind: "Error"; code: string; checkout?: "CheckingOut" | "Paid" }
+    /** Batch 65: `readAt`, when this device last read the menu, for the page's one stamp. */
+    | { kind: "Ready"; menu: CounterMenu; readAt: string }
+  >({ kind: "Loading" });
+  const [reload, setReload] = useState(0);
+  // v15 b12: switching the language reloads the page; the order being taken comes back with it.
+  const draftKey = "staffOrder:" + storeReference + ":" + (tableReference ?? "counter");
+  const [switchDraft] = useState(() => keptDraftOf(takeKeptThroughLanguageSwitch(draftKey)));
+  /**
+   * Batch 67 (v15 b66 live): the confirmation of a round just sent or an order just paid, kept
+   * through the language switch's reload (shown again, never sent or recorded again).
+   */
+  const sentKey = "staffOrderSent:" + storeReference + ":" + (tableReference ?? "counter");
+  const [keptSent] = useState(() =>
+    switchDraft === null ? keptSentOf(takeKeptThroughLanguageSwitch(sentKey)) : null,
+  );
+  /**
+   * Batch 65 (v15 b64 live): a table's round not sent yet, kept on this device, comes back after a
+   * reload or signing in again, with a note; it is checked against the table's party and the
+   * business day once they are read, and never sent by itself.
+   * Batch 66 (v15 b65 live, TM2 K65 A): what the language switch kept is checked the same way. It
+   * was not, so a table closed and seated again within the switch's minute showed the last
+   * party's dishes to the new party with no note; and the switch dropped the notes reminder.
+   */
+  const [savedRound] = useState(() =>
+    startingStaffRound(
+      switchDraft,
+      switchDraft === null && keptSent === null && tableMode && tableReference !== null
+        ? loadStaffRoundDraft<Line>(storeReference, tableReference)
+        : null,
+    ),
+  );
+  const restoredDraft = savedRound;
+  /** The round brought back, and its lines (by key) still missing the kitchen note they had. */
+  const [roundBack, setRoundBack] = useState<StaffRoundBack | null>(
+    () => savedRound?.roundBack ?? null,
+  );
+  const roundBackNow = useRef(roundBack);
+  roundBackNow.current = roundBack;
+  /** The kept round still to be checked against the table's party (when the table is read). */
+  const savedRoundCheck = useRef(tableMode ? savedRound : null);
+  const businessDay = useStoreBusinessDay();
+  const [lines, setLines] = useState<readonly Line[]>(
+    () => restoredDraft?.lines ?? keptSent?.lines ?? [],
+  );
+  /** WP-2423 M165: ticket lines whose price changed on the last menu read (until the next edit). */
+  const [repriced, setRepriced] = useState<readonly RepricedLine[]>([]);
+  const linesNow = useRef(lines);
+  linesNow.current = lines;
+  const [choosing, setChoosing] = useState<{
+    item: CounterMenuItem;
+    choices: Record<string, string[]>;
+    /** How many of each chosen option, where guests can take more than one of the same choice. */
+    counts: Record<string, number>;
+    quantity: number;
+    note: string;
+    /** The order line being changed; null for a new line. */
+    editing: string | null;
+  } | null>(null);
+  const [search, setSearch] = useState("");
+  // Read once per visit, so the dishes staff reach for stay where they are while they work.
+  const [oftenOrdered] = useState(() => loadOftenOrdered(storeReference));
+  const [activeSection, setActiveSection] = useState<string | null>(null);
+  // "0": no tip; a percentage the Store offers, as text; or an amount typed in.
+  const [tip, setTip] = useState<string>(() => restoredDraft?.tip ?? keptSent?.tip ?? "0");
+  const [customTip, setCustomTip] = useState(
+    () => restoredDraft?.customTip ?? keptSent?.customTip ?? "",
+  );
+  const [paper, setPaper] = useState(() => keptSent?.paper ?? false);
+  const [paidAt, setPaidAt] = useState("");
+  const [slip, setSlip] = useState("");
+  // WP-2423 M52 (DEC-COUNTER-CASH): how the counter guest pays, and the cash they handed over.
+  const [tender, setTender] = useState<"CardMachine" | "Cash">(
+    () => keptSent?.tender ?? "CardMachine",
+  );
+  const [received, setReceived] = useState("");
+  const [largeChangeConfirmed, setLargeChangeConfirmed] = useState(false);
+  // WP-2423 M52: a cash Record that got no answer keeps the cash received as sent until it is
+  // answered, so recording again is the same payment (never a new one the server calls paid).
+  const [cashUnanswered, setCashUnanswered] = useState(false);
+  // WP-2423 (rush-logging-and-entry): the last payment record got no answer: its button says
+  // "Record again" as the note above it does, and records the same payment operation again.
+  const [recordAgain, setRecordAgain] = useState(false);
+  const [changeDue, setChangeDue] = useState<string | null>(() => keptSent?.changeDue ?? null);
+  const [placed, setPlaced] = useState<PlacedCounterOrder | null>(() => keptSent?.placed ?? null);
+  // Batch 64 (v15 b63 live, F42): a "Sent, not paid yet" order is being charged above.
+  const [resumedCharging, setResumedCharging] = useState(false);
+  const [phase, setPhase] = useState<
+    "Building" | "Sending" | "Charge" | "Recording" | "Paid" | "Accepted" | "Sent"
+  >(() => keptSent?.phase ?? "Building");
+  const phaseNow = useRef(phase);
+  phaseNow.current = phase;
+  const [problem, setProblem] = useState<string | null>(null);
+  const [problemNeedsTableCode, setProblemNeedsTableCode] = useState(false);
+  // WP-2423 item 8 ⑦: the guests' unsent items the server named, to add to this round.
+  const [tableCartOffer, setTableCartOffer] = useState<{
+    readonly cartVersion: number;
+    readonly items: readonly TableCartItem[];
+  } | null>(null);
+  // WP-2423 (staff-round-soldout): the guests' items taken off with the round sent, to tell them.
+  // Batch 67: kept as what it says, so a language switch says it again in the new language.
+  const [removedSource, setRemovedSource] = useState<RemovedSource | null>(
+    () => keptSent?.removed ?? null,
+  );
+  const removedNote = removedNoteFrom(removedSource);
+  // WP-2423 batch 28: the guests' dishes a sent round took in, shown with it (its total and the
+  // card-machine amount include them), so staff never charge an amount they can't see.
+  const [sentGuest, setSentGuest] = useState<readonly GuestCartLine[]>(
+    () =>
+      keptSent?.sentGuest.map((line, index) => ({
+        ...line,
+        cartItemReference: "kept-" + String(index),
+        estimateMinor: line.estimateMinor === null ? null : BigInt(line.estimateMinor),
+      })) ?? [],
+  );
+  // WP-2423 M35: the table's dining session (from the Tables list), the guests' unsent lines read
+  // from it before staff send, and what staff decided for each (Send unless it can't be sent).
+  const [tableSession, setTableSession] = useState<string | null>(null);
+  /**
+   * v15 staff-round-speed: the party this order is being taken for — the table's dining session
+   * when its first dish went on (null: the table was free). Sent with the order, so an order left
+   * on a tablet after its party has gone is never placed on the next party's bill unasked.
+   */
+  const draftParty = useRef<{ readonly session: string | null } | null>(
+    restoredDraft?.party ?? null,
+  );
+  const [partyChanged, setPartyChanged] = useState(false);
+  if (lines.length === 0) draftParty.current = null;
+  else if (tableMode && draftParty.current === null) draftParty.current = { session: tableSession };
+  const [guestCart, setGuestCart] = useState<TableCart | null>(null);
+  const [guestCartFailed, setGuestCartFailed] = useState(false);
+  const [guestDecisions, setGuestDecisions] = useState<Readonly<Record<string, GuestLineDecision>>>(
+    {},
+  );
+  const tableCartClient = useMemo(() => createTableCartClient(fetcher), [fetcher]);
+  const guestRead = useRef<AbortController | null>(null);
+  // Batch 67: where the paid line came from, said in the language on screen.
+  const [paidSource, setPaidSource] = useState<PaidNoteSource | null>(() => keptSent?.paid ?? null);
+  const paidNote = paidSource === null ? null : paidNoteFrom(paidSource, tableMode);
+  // WP-2423 (v15 751dd768): re-read the sent, unpaid counter orders after a send or a payment.
+  const [awaitingKey, setAwaitingKey] = useState(0);
+  // b11 review: a paper slip refused as already recorded with another order (named), and what staff
+  // then confirmed about it for the next send or record (recorded with their name).
+  const [slipHeld, setSlipHeld] = useState<{ readonly orderNumber: string | null } | null>(null);
+  const slipConfirmation = useRef<SlipConfirmation | null>(null);
+  const clearSlipHeld = () => {
+    setSlipHeld(null);
+    slipConfirmation.current = null;
+  };
+  // b11 review: the carts of the sends of this order operation that got no answer. One of them may
+  // have placed the order; when they were all the same, "Already ordered" takes those dishes off
+  // the cart, otherwise staff are asked to before sending again (never ordered or charged twice).
+  const unansweredLines = useRef<(readonly Line[])[]>([]);
+  const [alreadyInOrder, setAlreadyInOrder] = useState<{
+    readonly orderNumber: string | null;
+  } | null>(null);
+  const [alreadyInOrderChecked, setAlreadyInOrderChecked] = useState(false);
+  // b11: orders this page saw paid; the sent-not-paid list never offers payment for them again,
+  // even when its read lags the payment by a few seconds.
+  const [paidHere, setPaidHere] = useState<ReadonlySet<string>>(() => new Set());
+  const paidOrderReference =
+    placed !== null && (phase === "Paid" || phase === "Accepted") ? placed.orderReference : null;
   useEffect(() => {
-    let active = true;
-    void client
-      .load()
-      .then((value) => {
-        if (active) setState({ kind: "Found", view: parseStaffOrderEntryView(value) });
+    if (paidOrderReference === null) return;
+    setPaidHere((known) =>
+      known.has(paidOrderReference) ? known : new Set([...known, paidOrderReference]),
+    );
+  }, [paidOrderReference]);
+  // WP-2423 M127: the order being charged may be cancelled by this staff member (from Orders' read);
+  // null until that read answers, so nobody is told to ask a manager before it is known.
+  const [placedCancellable, setPlacedCancellable] = useState<boolean | null>(null);
+  // DEC-PAPER-SEND-IDEMPOTENT: a counter send from this tablet that got no answer before the page
+  // was reloaded (kept for the Store until it is answered): the next send is the same order.
+  const [restoredSend, setRestoredSend] = useState<UnansweredCounterSend | null>(() =>
+    tableMode ? null : loadUnansweredCounterSend(storeReference),
+  );
+  const placeOperation = useRef<string | null>(restoredSend?.operationReference ?? null);
+  // DEC-PAPER-SEND-IDEMPOTENT: the last counter send got no answer (or is still being sent), so
+  // it may have placed the order (and, on paper, recorded its sale). Until it is answered, a
+  // change to the order keeps the same operation: the server then names the order it placed
+  // instead of placing a second one.
+  const sendUnanswered = useRef(restoredSend !== null);
+  // WP-2423 (rush-logging-and-entry): the button says what the note above it asks ("Send again"),
+  // not "Send order", while the last send is unanswered; it sends the same operation again.
+  const [sendAgain, setSendAgain] = useState(restoredSend !== null);
+  /** The send was answered (or staff start over): this tablet no longer keeps it. */
+  const sendAnswered = () => {
+    sendUnanswered.current = false;
+    setSendAgain(false);
+    if (tableMode) return;
+    clearUnansweredCounterSend(storeReference);
+    setRestoredSend(null);
+  };
+  /** A change to what is ordered: a new order intent, unless the last send is unanswered. */
+  const newOrderIntent = () => {
+    if (tableMode || !sendUnanswered.current) placeOperation.current = null;
+  };
+  // DEC-PAPER-ORDER-PAID-AT-SEND: the payment operation sent with a paper order (one per order
+  // operation and payment as entered), so a retry of either never records it twice.
+  // The key is a digest of the payment as entered (kept across a reload without the slip itself).
+  const paperOperation = useRef<{ key: string; reference: string } | null>(
+    restoredSend?.paperPayment === null || restoredSend?.paperPayment === undefined
+      ? null
+      : { key: restoredSend.paperPayment.digest, reference: restoredSend.paperPayment.reference },
+  );
+  // One operation per payment as staff entered it (as at table checkout): a retry after no answer
+  // with the same details is the same command (never counted twice); a corrected paid-at or slip is
+  // a new one, not a conflict with the first.
+  const payOperation = useRef<{ key: string; reference: string } | null>(null);
+  // WP-2423 (v15 fabf0261): the server refused the paid-at itself; staff correct it in the charge
+  // step, where it is shown, and record again.
+  const [paidAtRefused, setPaidAtRefused] = useState(false);
+  const [focusPaidAt, setFocusPaidAt] = useState(0);
+  const chargePaidAt = useRef<HTMLInputElement>(null);
+  // The paid-at typed before sending, focused when the server refuses it (nothing was sent).
+  const sendPaidAt = useRef<HTMLInputElement>(null);
+  const chargeHeading = useRef<HTMLHeadingElement>(null);
+  const ticketHeading = useRef<HTMLHeadingElement>(null);
+  /**
+   * Batch 63 (F47): on a phone the bottom bar leads to Send order; once Send order itself is on
+   * screen the bar steps aside, so there is one filled button, never two.
+   */
+  const [sendInView, setSendInView] = useState(false);
+  const sendObserver = useRef<IntersectionObserver | null>(null);
+  const sendArea = useCallback((target: HTMLDivElement | null) => {
+    sendObserver.current?.disconnect();
+    sendObserver.current = null;
+    if (target === null || typeof IntersectionObserver === "undefined") {
+      setSendInView(false);
+      return;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      const entry = entries[entries.length - 1];
+      if (entry !== undefined) setSendInView(entry.isIntersecting);
+    });
+    observer.observe(target);
+    sendObserver.current = observer;
+  }, []);
+  const chooseHeading = useRef<HTMLHeadingElement>(null);
+  const chooseDialog = useRef<HTMLDialogElement>(null);
+  // WP-2423 item 5: the clock behind the payment-time warning, ticking while payment is due.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (phase !== "Charge" && phase !== "Recording") return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 15_000);
+    return () => clearInterval(timer);
+  }, [phase]);
+
+  /**
+   * Batch 55 (v15 b54 live): whether this table takes a round now (`staffRoundOffer`); for a table
+   * checking out, its own bill (as its Tables panel reads it) says whether it is paid. A bill that
+   * can't be read is said as checking out, whose wording covers both.
+   */
+  const roundOfferOf = useCallback(
+    async (found: StaffDiningTable, signal?: AbortSignal): Promise<StaffRoundOffer> => {
+      const offer = staffRoundOffer(found, false);
+      if (offer !== "CheckingOut" || found.currentDiningSessionReference === null) return offer;
+      try {
+        const bill = await createTableCheckoutClient(fetcher).bill(
+          csrf,
+          found.currentDiningSessionReference,
+          signal,
+        );
+        return staffRoundOffer(found, tableSettled(tableFactsFromBill(bill)));
+      } catch {
+        return offer;
+      }
+    },
+    [csrf, fetcher],
+  );
+  useEffect(() => {
+    const controller = new AbortController();
+    setMenu({ kind: "Loading" });
+    if (tableMode && tableReference === null) {
+      setMenu({ kind: "Error", code: "TableUnknown" });
+      return () => controller.abort();
+    }
+    let seatedSession: string | null | undefined;
+    const loadTable = async (): Promise<"CheckingOut" | "Paid" | undefined> => {
+      if (tableReference === null) return undefined;
+      // The table's name as staff know it, from the Tables list (paged, at most 1,000 tables).
+      const tables = createDiningSessionClient(fetcher);
+      let after: string | null = null;
+      for (let page = 0; page < 10; page += 1) {
+        const result = await tables.tables(csrf, after, controller.signal);
+        const found = result.items.find((table) => table.tableReference === tableReference);
+        if (found !== undefined) {
+          // Batch 55: the rule the Tables panel offers this screen by (and the send checks).
+          const offer = await roundOfferOf(found, controller.signal);
+          if (offer === "Unavailable") throw new CounterOrderClientError("TableUnavailable");
+          if (offer === "NoCode") throw new CounterOrderClientError("TableHasNoQr");
+          setTableLabel(found.stableLabel);
+          if (offer !== "Offered") return offer;
+          setTablePaysLater(found.paymentTiming === "PayLater");
+          setTableSession(found.currentDiningSessionReference);
+          seatedSession = found.currentDiningSessionReference;
+          setUnusedJoinCode(found.unusedJoinCode === true);
+          return;
+        }
+        if (result.next === null) break;
+        after = result.next;
+      }
+      throw new CounterOrderClientError("TableUnavailable");
+    };
+    Promise.all([client.loadMenu(controller.signal, tableMode ? "DineIn" : "Pickup"), loadTable()])
+      .then(([value, checkout]) => {
+        if (controller.signal.aborted) return;
+        if (checkout !== undefined) {
+          setMenu({ kind: "Error", code: "TableCheckingOut", checkout });
+          return;
+        }
+        setMenu({ kind: "Ready", menu: value, readAt: new Date().toISOString() });
+        // Batch 65: a round kept on this device for another party (the table was closed and
+        // seated again, or is free now) is not this party's: it is dropped.
+        const saved = savedRoundCheck.current;
+        savedRoundCheck.current = null;
+        if (saved !== null && !staffRoundIsForParty(saved.party, seatedSession)) {
+          setLines([]);
+          setTip("0");
+          setCustomTip("");
+          setRoundBack(null);
+          return;
+        }
+        // An order kept through a language switch is named as the menu just read names it.
+        setLines((current) => (current.length === 0 ? current : rebindLines(current, value).lines));
       })
       .catch((error: unknown) => {
-        if (active)
-          setState({
-            kind: error instanceof StaffOrderEntryClientError ? error.code : "Unavailable",
-          });
+        if (controller.signal.aborted) return;
+        setMenu({
+          kind: "Error",
+          code:
+            error instanceof CounterOrderClientError &&
+            (error.code === "PermissionDenied" ||
+              error.code === "TableUnavailable" ||
+              error.code === "TableHasNoQr")
+              ? error.code
+              : "Unavailable",
+        });
       });
-    return () => {
-      active = false;
+    return () => controller.abort();
+  }, [client, reload, csrf, fetcher, tableMode, tableReference, roundOfferOf]);
+  useEffect(() => {
+    if (phase === "Charge" || phase === "Sent") chargeHeading.current?.focus();
+  }, [phase]);
+  // v15 b12: what the language switch keeps of the order being built (nothing once it is sent).
+  const tipNow = useRef({ tip, customTip });
+  tipNow.current = { tip, customTip };
+  // Batch 65: a round kept from an earlier business day is not brought back.
+  const today = businessDay?.businessDate ?? null;
+  const takenOn = useRef<string | null>(null);
+  takenOn.current = today ?? savedRound?.businessDate ?? null;
+  // Compared only with the Store's own day read (not the sign-in's date, which may be older).
+  const readToday = businessDay?.startsAt == null ? null : today;
+  const savedRoundDayChecked = useRef(false);
+  useEffect(() => {
+    if (savedRound === null || savedRound.businessDate === null || readToday === null) return;
+    // Once, on the first day read: a day ending while staff work leaves their round alone.
+    if (savedRoundDayChecked.current) return;
+    savedRoundDayChecked.current = true;
+    if (savedRound.businessDate === readToday) return;
+    savedRoundCheck.current = null;
+    setLines([]);
+    setRoundBack(null);
+  }, [savedRound, readToday]);
+  // Batch 65: the round being taken at a table is kept on this device until it is sent or emptied.
+  const noteKeysLeftOut = roundBack?.noteKeysLeftOut;
+  useEffect(() => {
+    if (!tableMode || tableReference === null) return;
+    if (phase !== "Building" || lines.length === 0) {
+      clearStaffRoundDraft(storeReference, tableReference);
+      return;
+    }
+    keepStaffRoundDraft(storeReference, tableReference, {
+      savedAt: Date.now(),
+      businessDate: today ?? savedRound?.businessDate ?? null,
+      party: draftParty.current,
+      lines,
+      tip,
+      customTip,
+      ...(noteKeysLeftOut === undefined ? {} : { noteKeysLeftOut }),
+    });
+  }, [
+    customTip,
+    lines,
+    noteKeysLeftOut,
+    phase,
+    savedRound,
+    storeReference,
+    tableMode,
+    tableReference,
+    tip,
+    today,
+  ]);
+  useEffect(() => {
+    if (lines.length === 0 || phase !== "Building") setRoundBack(null);
+  }, [lines.length, phase]);
+  // Batch 65 review: a brought-back line given its note again, or removed, no longer needs one.
+  useEffect(() => {
+    setRoundBack((back) => {
+      if (back === null) return back;
+      const missing = back.noteKeysLeftOut.filter((key) =>
+        lines.some((line) => line.key === key && (line.note ?? "").trim() === ""),
+      );
+      return missing.length === back.noteKeysLeftOut.length ? back : { noteKeysLeftOut: missing };
+    });
+  }, [lines]);
+  // Once the kept order is sent, started over or changed, a later reload does not bring it back.
+  const keptLines = useRef(restoredDraft?.lines ?? null);
+  useEffect(() => {
+    if (keptLines.current === null) return;
+    if (phase === "Building" && lines.length > 0 && lines.length === keptLines.current.length)
+      return;
+    keptLines.current = null;
+    forgetKeptThroughLanguageSwitch(draftKey);
+  }, [draftKey, lines, phase]);
+  useEffect(
+    () =>
+      keepThroughLanguageSwitch(draftKey, () =>
+        phaseNow.current === "Building" && linesNow.current.length > 0
+          ? {
+              lines: linesNow.current,
+              tip: tipNow.current.tip,
+              customTip: tipNow.current.customTip,
+              party: draftParty.current,
+              // Batch 66: checked again after the reload, as a round kept on the device is.
+              businessDate: takenOn.current,
+              roundBack: roundBackNow.current,
+            }
+          : null,
+      ),
+    [draftKey],
+  );
+  // Batch 67 (v15 b66 live): a round just sent or an order just paid keeps its confirmation
+  // through the language switch (only what it shows; nothing is sent or recorded again).
+  const sentNow = useRef<KeptConfirmation<Line> | null>(null);
+  sentNow.current =
+    placed !== null &&
+    (phase === "Sent" || phase === "Paid" || phase === "Accepted") &&
+    (phase === "Sent") === placed.payLater
+      ? {
+          phase,
+          placed: { ...placed, paperPayment: null },
+          lines,
+          tip,
+          customTip,
+          tender,
+          paper,
+          changeDue,
+          paid: paidSource,
+          removed: removedSource,
+          sentGuest: sentGuest.map((line) => ({
+            name: line.name,
+            options: line.options,
+            quantity: line.quantity,
+            estimateMinor: line.estimateMinor === null ? null : line.estimateMinor.toString(),
+            unsellable: line.unsellable,
+            phoneNumber: line.phoneNumber,
+            phoneLeft: line.phoneLeft,
+          })),
+        }
+      : null;
+  useEffect(() => keepThroughLanguageSwitch(sentKey, () => sentNow.current), [sentKey]);
+  // Read once: a later reload (not a switch) starts a new order as before.
+  useEffect(() => forgetKeptThroughLanguageSwitch(sentKey), [sentKey]);
+  // After the charge heading takes focus on returning to Charge: a refused paid-at takes it instead.
+  useEffect(() => {
+    if (focusPaidAt === 0) return;
+    const input = chargePaidAt.current ?? sendPaidAt.current;
+    input?.focus();
+    input?.select?.();
+  }, [focusPaidAt]);
+  // The item's options open over the menu (a sheet on a phone), so the order stays where it is.
+  const choosingItem = choosing?.item.sellableReference ?? null;
+  useEffect(() => {
+    if (choosingItem === null) return;
+    const dialog = chooseDialog.current;
+    if (dialog !== null && !dialog.open) dialog.showModal();
+    chooseHeading.current?.focus();
+  }, [choosingItem]);
+  // The category bar follows the menu as it scrolls.
+  const sectionKeys =
+    menu.kind === "Ready"
+      ? menu.menu.sections.map((section) => section.sectionReference).join()
+      : "";
+  useEffect(() => {
+    if (sectionKeys === "" || search !== "" || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const seen = entries.find((entry) => entry.isIntersecting);
+        if (seen) setActiveSection(seen.target.id);
+      },
+      { rootMargin: "-20% 0px -70% 0px" },
+    );
+    for (const key of sectionKeys.split(",")) {
+      const section = document.getElementById("counter-section-" + key);
+      if (section !== null) observer.observe(section);
+    }
+    return () => observer.disconnect();
+  }, [sectionKeys, search]);
+
+  // v15 run: what the store can sell changes with every order (stock used, items sold out), so
+  // the menu is re-read quietly after each send or payment, every 30 s while staff build an
+  // order, and when the screen comes back into view. A failed re-read keeps the last menu (the
+  // server still refuses an item that ran out, naming it); it never blanks the order in progress.
+  const menuRefresh = useRef<AbortController | null>(null);
+  const refreshMenu = useCallback(() => {
+    menuRefresh.current?.abort();
+    const controller = new AbortController();
+    menuRefresh.current = controller;
+    client
+      .loadMenu(controller.signal, tableMode ? "DineIn" : "Pickup")
+      .then((value) => {
+        if (controller.signal.aborted) return;
+        setMenu((current) =>
+          current.kind === "Ready"
+            ? { kind: "Ready", menu: value, readAt: new Date().toISOString() }
+            : current,
+        );
+        // WP-2423 M165: the ticket follows the menu just read; staff see what changed before
+        // anything is sent, and a changed ticket is a new order intent.
+        const rebound = rebindLines(linesNow.current, value);
+        if (rebound.repriced.length > 0 && phaseNow.current === "Building") {
+          if (tableMode || !sendUnanswered.current) placeOperation.current = null;
+          setLines(rebound.lines);
+          setRepriced(rebound.repriced);
+        } else if (phaseNow.current === "Building") setLines(rebound.lines);
+      })
+      .catch(() => undefined);
+  }, [client, tableMode]);
+  useEffect(() => () => menuRefresh.current?.abort(), []);
+  const menuReady = menu.kind === "Ready";
+  // v15 cbff9d6f: no menu re-reads once this screen's sign-in has ended.
+  const live = useStaffSessionLive();
+  useEffect(() => {
+    if (!menuReady || !live || phase !== "Building") return;
+    const timer = setInterval(refreshMenu, MENU_REFRESH_MS);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refreshMenu();
     };
-  }, [client]);
-  return state.kind === "Found" ? (
-    <StaffOrderEntryScreen view={state.view} />
-  ) : (
-    <StaffOrderEntryState state={state.kind} />
+    window.addEventListener("focus", refreshMenu);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", refreshMenu);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [live, menuReady, phase, refreshMenu]);
+
+  // WP-2423 M35: the guests' unsent lines are on screen before staff send: read as soon as the
+  // table is known, every 5 s while the screen is in view, and once more when it comes back. A
+  // failed read keeps the last list and says so (the send is still checked by the server).
+  // A table that was free when this screen opened may have been seated since.
+  /** The table's party now (its dining session; null when free), or undefined when unread. */
+  /** This table as the Tables list reads it now (undefined: not found or not read). */
+  const findTable = useCallback(async (): Promise<StaffDiningTable | undefined> => {
+    if (tableReference === null) return undefined;
+    try {
+      const tables = createDiningSessionClient(fetcher);
+      let after: string | null = null;
+      for (let page = 0; page < 10; page += 1) {
+        const result = await tables.tables(csrf, after);
+        const found = result.items.find((table) => table.tableReference === tableReference);
+        if (found !== undefined) return found;
+        if (result.next === null) return undefined;
+        after = result.next;
+      }
+    } catch {
+      // Read again with the next send; the server still checks the cart.
+    }
+    return undefined;
+  }, [csrf, fetcher, tableReference]);
+  const findTableSession = useCallback(async (): Promise<string | null | undefined> => {
+    const found = await findTable();
+    if (found === undefined) return undefined;
+    setTableSession(found.currentDiningSessionReference);
+    return found.currentDiningSessionReference;
+  }, [findTable]);
+  /**
+   * Batch 55 (v15 b54 live): a send refused because the table can't take a round. When the table
+   * started checking out (or was paid) while staff built the round, staff read why and what to do
+   * next by the same rule the Tables panel offers the round by; the order stays as it is.
+   */
+  const refusalRead = useRef(0);
+  /**
+   * Batch 56 (v15 b55 live: after the refusal and the re-read the header still said "added to the
+   * table's bill" and a second Send posted again, 409): while the table is read again, and once it
+   * reads as taking no round, Send is held with the reason beside it and the header stops promising
+   * the table's bill; the draft stays. A re-read that fails keeps the refusal's own message and
+   * offers to read the table again, never to send again. A table that takes a round again (checkout
+   * cancelled) frees Send.
+   */
+  const [tableHold, setTableHold] = useState<{
+    readonly state: "Reading" | "ReadFailed" | Exclude<StaffRoundOffer, "Offered">;
+    /** The refusal's own message, said until the table is read as checking out or paid. */
+    readonly refused: string;
+  } | null>(null);
+  const explainTableRefusal = useCallback(
+    async (refused: string) => {
+      refusalRead.current += 1;
+      const read = refusalRead.current;
+      setProblem(null);
+      setTableHold({ state: "Reading", refused });
+      const found = await findTable();
+      const offer = found === undefined ? undefined : await roundOfferOf(found);
+      if (read !== refusalRead.current || phaseNow.current !== "Building") return;
+      if (found === undefined || offer === undefined) {
+        setTableHold({ state: "ReadFailed", refused });
+        return;
+      }
+      setTableLabel(found.stableLabel);
+      if (offer === "Offered") {
+        setTableHold(null);
+        return;
+      }
+      setTableHold({ state: offer, refused });
+    },
+    [findTable, roundOfferOf],
+  );
+  const readGuestCart = useCallback(() => {
+    if (tableSession === null) return;
+    guestRead.current?.abort();
+    const controller = new AbortController();
+    guestRead.current = controller;
+    tableCartClient
+      .read(csrf, tableSession, controller.signal)
+      .then((cart) => {
+        if (controller.signal.aborted) return;
+        setGuestCart(cart);
+        setGuestCartFailed(false);
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        // WP-2423 batch 28: signed out (or no longer allowed) is not "couldn't be read just now";
+        // the round's own answer tells staff to sign in again.
+        if (error instanceof TableCartError && error.code === "PermissionDenied") {
+          setGuestCartFailed(false);
+          return;
+        }
+        setGuestCartFailed(true);
+      });
+  }, [csrf, tableCartClient, tableSession]);
+  useEffect(() => () => guestRead.current?.abort(), []);
+  useEffect(() => {
+    if (!tableMode || tableSession === null || !live || phase !== "Building") return;
+    readGuestCart();
+    const timer = setInterval(() => {
+      if (document.visibilityState !== "hidden") readGuestCart();
+    }, GUEST_CART_REFRESH_MS);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") readGuestCart();
+    };
+    window.addEventListener("focus", readGuestCart);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", readGuestCart);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [live, phase, readGuestCart, tableMode, tableSession]);
+  const guestLines = useMemo(
+    () => guestCartLines(guestCart, menu.kind === "Ready" ? menu.menu : null),
+    [guestCart, menu],
+  );
+  // A line that can't be sent is taken out unless staff choose otherwise (they can't send it);
+  // every other line goes with the round unless staff take it out.
+  const decisionOf = (line: GuestCartLine): GuestLineDecision =>
+    line.unsellable ? "Remove" : (guestDecisions[line.cartItemReference] ?? "Send");
+  const guestSent = guestLines.filter((line) => decisionOf(line) === "Send");
+  const guestRemoved = guestLines.filter((line) => decisionOf(line) === "Remove");
+  const decide = (line: GuestCartLine, decision: GuestLineDecision) => {
+    placeOperation.current = null;
+    setProblem(null);
+    setGuestDecisions((current) => ({ ...current, [line.cartItemReference]: decision }));
+  };
+
+  // Any change to what is ordered is a new order intent.
+  const changeLines = (next: readonly Line[]) => {
+    newOrderIntent();
+    setRepriced([]);
+    setProblem(null);
+    setProblemNeedsTableCode(false);
+    setLines(next);
+  };
+  const itemPrice = (item: CounterMenuItem) =>
+    item.available
+      ? item.priceMinor === null
+        ? t("Price at checkout")
+        : cad(item.priceMinor)
+      : t("Sold out");
+  const canAdd = (item: CounterMenuItem) => item.available && ordering && item.priceMinor !== null;
+  // An item with nothing to choose goes straight onto the order (one more of the same line); one
+  // with options opens its choices first, the usual ones already picked. A kitchen note is added
+  // with Change on the order line (WP-2423 M53: at the counter too).
+  const add = (item: CounterMenuItem) => {
+    if (item.rules.length > 0) {
+      setChoosing({
+        item,
+        choices: defaultChoices(item),
+        counts: defaultCounts(item),
+        quantity: 1,
+        note: "",
+        editing: null,
+      });
+      return;
+    }
+    const same = lines.find(
+      (line) =>
+        line.item.sellableReference === item.sellableReference &&
+        line.options.length === 0 &&
+        (line.note ?? null) === null,
+    );
+    changeLines(
+      same
+        ? lines.map((line) =>
+            line.key === same.key ? { ...line, quantity: line.quantity + 1 } : line,
+          )
+        : [
+            ...lines,
+            { key: serviceOperationReference(), item, quantity: 1, options: [], note: null },
+          ],
+    );
+  };
+  // WP-2423 item 8 ⑦ (Owner decision 11): the Store's own percentages; with tips off, no tip.
+  const tips = menu.kind === "Ready" ? menu.menu.tips : null;
+  const tipOptions = tips === null || !tips.enabled ? [] : ["0", ...tips.tierPercents.map(String)];
+  useEffect(() => {
+    if (tip !== "Custom" && tip !== "0" && tips !== null && !tipOptions.includes(tip)) setTip("0");
+  }, [tip, tips, tipOptions]);
+  const tipChoice = (): CounterTip | null => {
+    if (tip === "0" || tablePaysLater || tips?.enabled === false) return { kind: "None" };
+    if (tip !== "Custom") return { kind: "Percent", percent: Number(tip) };
+    const match = /^(0|[1-9][0-9]{0,4})(?:\.([0-9]{1,2}))?$/u.exec(customTip.trim());
+    if (!match) return null;
+    return {
+      kind: "Amount",
+      amountMinor: String(Number(match[1]) * 100 + Number((match[2] ?? "0").padEnd(2, "0"))),
+    };
+  };
+  const paperInstant = paper ? paidAtInstant(paidAt, Date.now(), timeZone) : null;
+  /** DEC-PAPER-ORDER-PAID-AT-SEND: how the paper order was paid (a table's cash is at checkout). */
+  const paperTender: "CardMachine" | "Cash" = tableMode ? "CardMachine" : tender;
+  const estimate = lines.reduce<bigint | null>((sum, line) => {
+    const value = estimatedLineMinor(line);
+    return sum === null || value === null ? null : sum + value;
+  }, 0n);
+  const itemCount = lines.reduce((sum, line) => sum + line.quantity, 0);
+  // WP-2423 M165 review: chosen options the menu just read no longer offers, by dish.
+  const withdrawn = lines.flatMap((line) => {
+    const options = withdrawnOptions(line);
+    return options.length > 0 ? [{ dish: line.item.name, options }] : [];
+  });
+  // WP-2423 M35: the guests' lines sent with the round, about their price from the menu.
+  const guestEstimate = guestSent.reduce<bigint | null>(
+    (sum, line) => (sum === null || line.estimateMinor === null ? null : sum + line.estimateMinor),
+    0n,
+  );
+  const roundEstimate =
+    estimate === null || guestEstimate === null ? null : estimate + guestEstimate;
+  const roundCount = itemCount + guestSent.reduce((sum, line) => sum + line.quantity, 0);
+  // WP-2423 batch 28: once sent, the order's count includes the guests' dishes it took in.
+  const sentItemCount =
+    placed !== null && phase !== "Building" && phase !== "Sending"
+      ? itemCount + sentGuest.reduce((sum, line) => sum + line.quantity, 0)
+      : itemCount;
+  const canSend =
+    phase === "Building" &&
+    tableHold === null &&
+    (lines.length > 0 || (tableMode && guestSent.length > 0)) &&
+    withdrawn.length === 0 &&
+    !(guestCart?.guestPaying === true && guestLines.length > 0) &&
+    tipChoice() !== null &&
+    (alreadyInOrder === null || alreadyInOrderChecked) &&
+    (!paper ||
+      tablePaysLater ||
+      (paperInstant !== null && (paperTender === "Cash" || validSlipReference(slip.trim()))));
+
+  const send = async (
+    includeTableCart: {
+      readonly expectedCartVersion: number;
+      readonly removeUnavailable: readonly TableCartItem[];
+    } | null = null,
+  ) => {
+    const chosenTip = tipChoice();
+    if (!canSend || chosenTip === null) return;
+    refusalRead.current += 1;
+    // WP-2423 M35: every guest line on screen goes with a decision, against the cart version read.
+    const decided =
+      includeTableCart === null &&
+      tableReference !== null &&
+      guestCart !== null &&
+      guestCart.lines.length > 0
+        ? {
+            expectedCartVersion: guestCart.cartVersion,
+            lines: guestLines.map((line) =>
+              decisionOf(line) === "Send"
+                ? { cartItemReference: line.cartItemReference, decision: "Send" as const }
+                : {
+                    cartItemReference: line.cartItemReference,
+                    decision: "Remove" as const,
+                    reason: guestRemovalReason(line),
+                  },
+            ),
+          }
+        : null;
+    const removedAtSend = guestRemoved;
+    const guestAtSend = guestSent;
+    if (tableMode && lines.length > 0) draftParty.current ??= { session: tableSession };
+    const forParty = draftParty.current?.session ?? null;
+    placeOperation.current ??= serviceOperationReference();
+    // DEC-PAPER-ORDER-PAID-AT-SEND: a paper order was paid during the outage; its payment goes with
+    // it and is recorded with it (a table that pays at the end has nothing to pay now).
+    const paperPayment =
+      paper && !tablePaysLater && paperInstant !== null
+        ? (() => {
+            const slipReference = paperTender === "Cash" || slip.trim() === "" ? null : slip.trim();
+            const key = paperPaymentDigest(
+              JSON.stringify([placeOperation.current, paperTender, slipReference, paperInstant]),
+            );
+            if (paperOperation.current?.key !== key)
+              paperOperation.current = { key, reference: serviceOperationReference() };
+            const confirmed = slipReference === null ? null : slipConfirmation.current;
+            return {
+              operationReference: paperOperation.current.reference,
+              tender: paperTender,
+              slipReference,
+              takenAt: paperInstant,
+              ...(confirmed === null ? {} : { slipConfirmation: confirmed }),
+            };
+          })()
+        : undefined;
+    const sentLines = lines;
+    // Batch 65: a round on its way is never kept to send again after a reload.
+    if (tableReference !== null) clearStaffRoundDraft(storeReference, tableReference);
+    setPhase("Sending");
+    setProblem(null);
+    setProblemNeedsTableCode(false);
+    setPartyChanged(false);
+    setTableCartOffer(null);
+    setRemovedSource(null);
+    setSentGuest([]);
+    setSlipHeld(null);
+    try {
+      const chosen = lines.map((line) => ({
+        sellableReference: line.item.sellableReference,
+        quantity: line.quantity,
+        optionSelections: line.options.map((option) => ({
+          optionReference: option.optionReference,
+          quantity: option.quantity,
+        })),
+      }));
+      const order =
+        tableReference !== null
+          ? await client.placeTableRound({
+              operationReference: placeOperation.current,
+              tableReference,
+              lines: chosen.map((line, index) => ({ ...line, note: lines[index]?.note ?? null })),
+              tip: chosenTip,
+              recordedAfterOutage: paper,
+              ...(forParty === null ? {} : { expectedDiningSessionReference: forParty }),
+              ...(paperPayment === undefined ? {} : { paperPayment }),
+              ...(decided !== null
+                ? { includeTableCart: decided }
+                : includeTableCart === null
+                  ? {}
+                  : {
+                      includeTableCart: {
+                        expectedCartVersion: includeTableCart.expectedCartVersion,
+                        ...(includeTableCart.removeUnavailable.length === 0
+                          ? {}
+                          : {
+                              removeUnavailable: includeTableCart.removeUnavailable.map(
+                                (item) => item.cartItemReference,
+                              ),
+                            }),
+                      },
+                    }),
+            })
+          : await client.placeOrder({
+              operationReference: placeOperation.current,
+              lines: counterOrderLines(lines),
+              tip: chosenTip,
+              recordedAfterOutage: paper,
+              ...(paperPayment === undefined ? {} : { paperPayment }),
+            });
+      sendAnswered();
+      unansweredLines.current = [];
+      slipConfirmation.current = null;
+      setAlreadyInOrder(null);
+      setAlreadyInOrderChecked(false);
+      setPlaced(order);
+      setPlacedCancellable(null);
+      if (decided !== null) {
+        setRemovedSource({
+          kind: "Guest",
+          lines: removedAtSend.map((line) => ({ name: line.name, unsellable: line.unsellable })),
+        });
+        setSentGuest(guestAtSend);
+      } else if (includeTableCart !== null && includeTableCart.removeUnavailable.length > 0)
+        setRemovedSource({
+          kind: "TableCart",
+          names: includeTableCart.removeUnavailable.map((item) => item.name),
+        });
+      setGuestDecisions({});
+      recordOrdered(
+        storeReference,
+        lines.map((line) => [line.item.sellableReference, line.quantity]),
+      );
+      payOperation.current = null;
+      const paperOutcome = order.paperPayment ?? null;
+      if (paperOutcome?.kind === "Recorded") {
+        // The paper order and its payment are recorded together: nothing is left to charge.
+        const recorded = paperOutcome.payment;
+        setPhase(recorded.acceptance === "Accepted" ? "Accepted" : "Paid");
+        setChangeDue(recorded.cash?.changeMinor ?? null);
+        setPaidSource({
+          kind: "Recorded",
+          recordedAfterOutage: true,
+          acceptance: recorded.acceptance,
+          cash: recorded.cash === null ? null : { changeMinor: recorded.cash.changeMinor },
+        });
+      } else if (paperOutcome?.error.code === "AlreadyPaid") {
+        // A retry minted a new payment operation (the tender, slip or time was changed after no
+        // answer) but the first one was recorded: the sale is in the takings, never "to charge".
+        setPhase("Paid");
+        setChangeDue(null);
+        setPaidSource({ kind: "PaperAlreadyRecorded" });
+      } else if (order.paid === true) {
+        // DEC-PAPER-SEND-IDEMPOTENT: the order sent again was paid meanwhile (charged from Orders
+        // or another tablet while this page had no answer): never asked to be charged again.
+        setPhase("Paid");
+        setChangeDue(null);
+        setPaidSource({
+          kind: "AlreadyPaid",
+          orderNumber: order.orderNumber,
+          paper: order.recordedAfterOutage,
+        });
+      } else {
+        if (paperOutcome !== null && paperPayment !== undefined) {
+          // Placed, but its payment was not recorded: the same payment, recorded again below.
+          const failure = paperOutcome.error;
+          payOperation.current = {
+            key: payIntentKey(
+              order.orderBatchReference,
+              order.totalMinor,
+              paperPayment.tender === "Cash",
+              paperPayment.slipReference ?? "",
+              paperPayment.takenAt,
+              paperPayment.tender === "Cash"
+                ? cashTotalMinor(BigInt(order.totalMinor)).toString()
+                : null,
+            ),
+            reference: paperPayment.operationReference,
+          };
+          if (failure.code === "AmountChanged" && failure.totalMinor !== null)
+            setPlaced({ ...order, totalMinor: failure.totalMinor });
+          setProblem(paperPaymentProblem(failure, paperPayment.tender === "Cash", tableMode));
+          // b11 review: the slip is recorded with another order; staff say whether it also paid
+          // this one (or is another slip), or leave this duplicate to be closed.
+          if (failure.code === "SlipAlreadyRecorded")
+            setSlipHeld({ orderNumber: failure.placedOrderNumber });
+          if (paidAtRefusal(failure)) {
+            setPaidAtRefused(true);
+            setFocusPaidAt((value) => value + 1);
+          }
+        }
+        setPhase(order.payLater ? "Sent" : "Charge");
+      }
+      setAwaitingKey((value) => value + 1);
+      refreshMenu();
+    } catch (error) {
+      const failure =
+        error instanceof CounterOrderClientError
+          ? error
+          : new CounterOrderClientError("Unavailable");
+      // An unknown or still-running outcome keeps the same operation (a retry returns the same
+      // order); anything else starts over as a new order.
+      const unanswered = failure.code === "OutcomeUnknown" || failure.code === "InProgress";
+      if (unanswered) unansweredLines.current = [...unansweredLines.current, sentLines];
+      if (unanswered && !tableMode && placeOperation.current !== null) {
+        // Kept for the Store, so a reload (a tablet that looks stuck) sends the same order again.
+        sendUnanswered.current = true;
+        setSendAgain(true);
+        keepUnansweredCounterSend(storeReference, {
+          operationReference: placeOperation.current,
+          sentAt: restoredSend?.sentAt ?? new Date().toISOString(),
+          recordedAfterOutage: paper,
+          paperPayment:
+            paperPayment === undefined || paperOperation.current === null
+              ? (restoredSend?.paperPayment ?? null)
+              : { digest: paperOperation.current.key, reference: paperOperation.current.reference },
+        });
+      } else if (unanswered) {
+        sendUnanswered.current = true;
+        setSendAgain(true);
+      } else {
+        sendAnswered();
+        placeOperation.current = null;
+      }
+      setProblem(
+        placeErrorText(
+          failure,
+          lines,
+          tableLabel === null
+            ? null
+            : t("Table {tableLabel}", { tableLabel: saidTable(tableLabel) }),
+          tableQrHref !== undefined,
+        ),
+      );
+      // DEC-PAPER-SEND-IDEMPOTENT (b11): the paper slip went with the order already placed; it is
+      // cleared here, so sending again (with dishes added) never records the same slip twice.
+      const paperCleared = failure.code === "AlreadyOrdered" && paperPayment !== undefined;
+      if (paperCleared) {
+        setPaper(false);
+        setPaidAt("");
+        setSlip("");
+        setPaidAtRefused(false);
+        paperOperation.current = null;
+        slipConfirmation.current = null;
+      }
+      if (failure.code === "SlipAlreadyRecorded")
+        setSlipHeld({ orderNumber: failure.placedOrderNumber });
+      // b11 review: the dishes already in order N are never sent (and charged) again. When every
+      // unanswered send of this order had the same cart, those dishes are taken off it; otherwise
+      // staff take them off, checking order N, before Send works again.
+      if (failure.code === "AlreadyOrdered" && !tableMode) {
+        const earlier = unansweredLines.current;
+        const first = earlier[0];
+        const known =
+          first !== undefined &&
+          earlier.every((sent) => sentDishesKey(sent) === sentDishesKey(first));
+        const left = first !== undefined && known ? withoutDishesSent(sentLines, first) : null;
+        if (left !== null) setLines(left);
+        setAlreadyInOrder(
+          left === null && sentLines.length > 0 ? { orderNumber: failure.placedOrderNumber } : null,
+        );
+        setAlreadyInOrderChecked(false);
+        setProblem(
+          alreadyOrderedCartText(
+            failure.placedOrderNumber,
+            left === null ? "Unknown" : left.length === 0 ? "AllInOrder" : "SomeLeft",
+            paperCleared,
+          ),
+        );
+      }
+      if (!unanswered) unansweredLines.current = [];
+      setProblemNeedsTableCode(failure.code === "TableHasNoQr");
+      setPartyChanged(failure.code === "TablePartyChanged");
+      if (failure.code === "TableUnavailable" && tableMode)
+        void explainTableRefusal(
+          placeErrorText(
+            failure,
+            lines,
+            tableLabel === null
+              ? null
+              : t("Table {tableLabel}", { tableLabel: saidTable(tableLabel) }),
+            tableQrHref !== undefined,
+          ),
+        );
+      // v15 batch-5 review: the paper paid-at was refused before anything was placed; staff
+      // correct it where they typed it.
+      if (failure.code === "TakenBeforeRecords" || failure.code === "PaidAtOutOfRange") {
+        setPaidAtRefused(true);
+        setFocusPaidAt((value) => value + 1);
+      }
+      // WP-2423 M35: with the guests' lines on screen, a cart that changed is read again and
+      // staff decide on it as it is now; the server's own list only when it can't be read here.
+      const liveList =
+        failure.code === "TableCartHasItems" && (decided !== null || guestCart !== null);
+      if (failure.code === "TableCartHasItems" || failure.code === "DishesLeftAtTable") {
+        if (tableSession === null) void findTableSession();
+        else readGuestCart();
+      }
+      // v15 b12: the dishes of this order may still go out from the table's cart (they show
+      // there, marked as staff's), so the order on screen is cleared: never sent twice.
+      if (failure.code === "DishesLeftAtTable") {
+        setLines([]);
+        setRepriced([]);
+      }
+      if (liveList)
+        setProblem(
+          t(
+            "Guests changed their cart just now. Check the list again, then send. Nothing was sent or charged.",
+          ),
+        );
+      setTableCartOffer(
+        failure.code === "TableCartHasItems" && failure.tableCart !== null && !liveList
+          ? { cartVersion: failure.tableCart.cartVersion, items: failure.pendingItems }
+          : null,
+      );
+      if (
+        failure.code === "ItemUnavailable" ||
+        failure.code === "ItemShort" ||
+        failure.code === "TipsOff" ||
+        failure.code === "TipChoicesChanged"
+      )
+        refreshMenu();
+      setPhase("Building");
+    }
+  };
+
+  const recordPayment = async (expectedTotalMinor: string) => {
+    if (placed === null || phase !== "Charge") return;
+    const inCash = tender === "Cash" && !tableMode;
+    // DEC-PAPER-ORDER-PAID-AT-SEND: a paper order's cash was taken (and change given) during the
+    // outage; its cash total is what is recorded.
+    const paperCash = inCash && placed.recordedAfterOutage;
+    const cash =
+      inCash && !paperCash
+        ? cashTender(BigInt(expectedTotalMinor), received, largeChangeConfirmed)
+        : null;
+    if (cash !== null ? !cash.ready : !inCash && !validSlipReference(slip.trim())) return;
+    if (placed.recordedAfterOutage && paperInstant === null) return;
+    const takenAt = placed.recordedAfterOutage ? paperInstant : null;
+    const tenderedMinor = paperCash
+      ? cashTotalMinor(BigInt(expectedTotalMinor)).toString()
+      : (cash?.receivedMinor?.toString() ?? null);
+    const intent = payIntentKey(
+      placed.orderBatchReference,
+      expectedTotalMinor,
+      inCash,
+      slip.trim(),
+      takenAt,
+      tenderedMinor,
+    );
+    if (payOperation.current?.key !== intent)
+      payOperation.current = { key: intent, reference: serviceOperationReference() };
+    const confirmed =
+      placed.recordedAfterOutage && !inCash && slip.trim() !== "" ? slipConfirmation.current : null;
+    setPhase("Recording");
+    setProblem(null);
+    setProblemNeedsTableCode(false);
+    setPaidAtRefused(false);
+    setSlipHeld(null);
+    let recorded;
+    try {
+      recorded = await client.recordPayment({
+        operationReference: payOperation.current.reference,
+        orderReference: placed.orderReference,
+        orderBatchReference: placed.orderBatchReference,
+        expectedTotalMinor,
+        slipReference: inCash || slip.trim() === "" ? null : slip.trim(),
+        takenAt,
+        ...(tenderedMinor === null ? {} : { tenderedMinor }),
+        ...(confirmed === null ? {} : { slipConfirmation: confirmed }),
+      });
+    } catch (error) {
+      const failure =
+        error instanceof CounterOrderClientError
+          ? error
+          : new CounterOrderClientError("Unavailable");
+      if (failure.code !== "OutcomeUnknown") payOperation.current = null;
+      setRecordAgain(failure.code === "OutcomeUnknown");
+      if (placed.recordedAfterOutage && failure.code === "AlreadyPaid") {
+        // DEC-PAPER-ORDER-PAID-AT-SEND: its payment is already recorded (an earlier try, or
+        // another tablet): the sale is in the takings and nothing is charged.
+        setCashUnanswered(false);
+        setProblem(null);
+        setChangeDue(null);
+        setPaidSource({ kind: "PaperAlreadyRecorded" });
+        setPhase("Paid");
+        setAwaitingKey((value) => value + 1);
+        return;
+      }
+      setCashUnanswered(inCash && !paperCash && failure.code === "OutcomeUnknown");
+      if (failure.code === "AmountChanged" && failure.totalMinor !== null)
+        setPlaced({ ...placed, totalMinor: failure.totalMinor });
+      // A cash Record with no answer says so beside the cash received it keeps.
+      setProblem(
+        placed.recordedAfterOutage
+          ? paperPaymentProblem(failure, inCash, tableMode)
+          : inCash && failure.code === "OutcomeUnknown"
+            ? null
+            : payErrorText(failure, inCash),
+      );
+      if (failure.code === "SlipAlreadyRecorded")
+        setSlipHeld({ orderNumber: failure.placedOrderNumber });
+      else slipConfirmation.current = null;
+      setPhase("Charge");
+      if (placed.recordedAfterOutage && paidAtRefusal(failure)) {
+        setPaidAtRefused(true);
+        setFocusPaidAt((value) => value + 1);
+      }
+      return;
+    }
+    setCashUnanswered(false);
+    setRecordAgain(false);
+    slipConfirmation.current = null;
+    refreshMenu();
+    setAwaitingKey((value) => value + 1);
+    // WP-2423 D1: the server accepts the paid order or round with the payment record (at the
+    // Order's current version), so it reaches the kitchen even if this page is closed now.
+    setPhase(recorded.acceptance === "Accepted" ? "Accepted" : "Paid");
+    setChangeDue(recorded.cash?.changeMinor ?? null);
+    setPaidSource({
+      kind: "Recorded",
+      recordedAfterOutage: placed.recordedAfterOutage,
+      acceptance: recorded.acceptance,
+      cash: recorded.cash === null ? null : { changeMinor: recorded.cash.changeMinor },
+    });
+  };
+
+  // WP-2423 M127: "Back to edit": the unpaid order was cancelled (entered by mistake); the same
+  // lines, notes and tip stay here to change and send again as a new order.
+  const backToEdit = () => {
+    setPlaced(null);
+    setPaidAt("");
+    setSlip("");
+    setReceived("");
+    setLargeChangeConfirmed(false);
+    setCashUnanswered(false);
+    setRecordAgain(false);
+    setChangeDue(null);
+    setProblem(null);
+    setPaidSource(null);
+    setRemovedSource(null);
+    setSentGuest([]);
+    setPaidAtRefused(false);
+    sendAnswered();
+    placeOperation.current = null;
+    payOperation.current = null;
+    paperOperation.current = null;
+    clearSlipHeld();
+    setPlacedCancellable(null);
+    setAwaitingKey((value) => value + 1);
+    setPhase("Building");
+  };
+  const startOver = () => {
+    setLines([]);
+    setPlaced(null);
+    setTip("0");
+    setCustomTip("");
+    setPaper(false);
+    setPaidAt("");
+    setSlip("");
+    setTender("CardMachine");
+    setReceived("");
+    setLargeChangeConfirmed(false);
+    setCashUnanswered(false);
+    setRecordAgain(false);
+    setChangeDue(null);
+    setProblem(null);
+    setProblemNeedsTableCode(false);
+    refusalRead.current += 1;
+    setTableHold(null);
+    setPaidSource(null);
+    setRemovedSource(null);
+    setSentGuest([]);
+    setPaidAtRefused(false);
+    sendAnswered();
+    placeOperation.current = null;
+    payOperation.current = null;
+    paperOperation.current = null;
+    clearSlipHeld();
+    unansweredLines.current = [];
+    setAlreadyInOrder(null);
+    setAlreadyInOrderChecked(false);
+    setPlacedCancellable(null);
+    setPhase("Building");
+  };
+
+  /** WP-2423 M52: this counter order is being paid in cash (tables pay cash at checkout). */
+  const counterCash = tender === "Cash" && !tableMode;
+  const pageTitle = tableMode
+    ? tableLabel === null
+      ? t("Table order")
+      : t("Table {tableLabel} order", { tableLabel: saidTable(tableLabel) })
+    : t("Counter order");
+  if (menu.kind === "Loading")
+    return (
+      <WorkspacePage title={pageTitle} meta={storeLabel}>
+        <StatePanel heading={t("Loading the menu")} status>
+          <p>{t("Loading what the store sells now…")}</p>
+        </StatePanel>
+      </WorkspacePage>
+    );
+  if (menu.kind === "Error") {
+    const [heading, text] =
+      menu.checkout !== undefined && tableLabel !== null
+        ? [
+            t("No round can be added for this table now"),
+            staffRoundRefusedText(menu.checkout, tableLabel),
+          ]
+        : (menuError[menu.code] ?? (menuError.Unavailable as [string, string]));
+    const createCode = menu.code === "TableHasNoQr" ? tableQrHref : undefined;
+    return (
+      <WorkspacePage title={pageTitle} meta={storeLabel}>
+        <StatePanel heading={heading} tone="error" status>
+          {createCode ? (
+            // Same rule as the Tables page: staff who can create codes get the link.
+            <p>
+              {t("Orders for a table use its code. Create one on")}
+              {wordGap()}
+              <Link to={createCode}>{t("Table QR codes")}</Link>{" "}
+              {t("(it can be printed later), then take the order.")}
+            </p>
+          ) : menu.code === "PermissionDenied" ? (
+            <NoAccessNotice />
+          ) : (
+            <p>{text}</p>
+          )}
+          {menu.code === "Unavailable" ? (
+            <button type="button" onClick={() => setReload((value) => value + 1)}>
+              {t("Try again")}
+            </button>
+          ) : tableMode ? (
+            <Link to="/operations/dining">{t("Back to Tables")}</Link>
+          ) : (
+            <Link to="/app">{t("Back to home")}</Link>
+          )}
+        </StatePanel>
+      </WorkspacePage>
+    );
+  }
+
+  const ordering = phase === "Building" || phase === "Sending";
+  const found = counterMenuSearch(menu.menu.sections, search);
+  const often = oftenOrdered.flatMap((reference) =>
+    menu.menu.sections
+      .flatMap((section) => section.items)
+      .filter((item) => item.sellableReference === reference)
+      .slice(0, 1),
+  );
+  const inOrder = (item: CounterMenuItem) =>
+    lines
+      .filter((line) => line.item.sellableReference === item.sellableReference)
+      .reduce((sum, line) => sum + line.quantity, 0);
+  // Batch 63 (CK-18): the first category reads as chosen at every width until the menu scrolls
+  // (a phone's observer saw no section yet, so none was marked).
+  const shownSection =
+    activeSection ??
+    (often.length > 0
+      ? "counter-section-often"
+      : menu.menu.sections[0] === undefined
+        ? null
+        : "counter-section-" + menu.menu.sections[0].sectionReference);
+  const jumpTo = (id: string) => {
+    setActiveSection(id);
+    document.getElementById(id)?.scrollIntoView({ block: "start" });
+  };
+  const itemRow = (item: CounterMenuItem) => (
+    <li key={item.sellableReference} data-available={item.available}>
+      <button
+        type="button"
+        className="counter-order__item"
+        disabled={!canAdd(item)}
+        aria-label={t("Add {name}", { name: item.name })}
+        onClick={() => add(item)}
+      >
+        <span className="counter-order__item-name">
+          {inOrder(item) > 0 ? (
+            <span className="counter-order__in-order">{inOrder(item)} × </span>
+          ) : null}
+          {item.name}
+          {/* Batch 63 (F41): the English UI also names the dish in Chinese, as the kitchen
+              ticket does, so a cashier matches what the guest asks for. */}
+          {chineseName(item.otherName) === null ? null : (
+            <span className="counter-order__item-other" lang="zh-Hans">
+              {chineseName(item.otherName)}
+            </span>
+          )}
+        </span>
+        <span className="counter-order__item-price">{itemPrice(item)}</span>
+      </button>
+    </li>
+  );
+  const choosingLine: Line | null =
+    choosing === null
+      ? null
+      : {
+          key: choosing.editing ?? serviceOperationReference(),
+          item: choosing.item,
+          quantity: choosing.quantity,
+          options: choosing.item.rules.flatMap((rule) =>
+            (choosing.choices[rule.bindingReference] ?? []).map((reference) => {
+              const option = rule.options.find(
+                (candidate) => candidate.optionReference === reference,
+              );
+              return {
+                optionReference: reference,
+                name: option?.name ?? "",
+                quantity: choosing.counts[reference] ?? option?.defaultQuantity ?? 1,
+              };
+            }),
+          ),
+          // WP-2423 M53: a counter line takes the guest's kitchen note too, as a table round does.
+          note: choosing.note.trim() !== "" ? choosing.note.trim() : null,
+        };
+  const choosingMinor = choosingLine === null ? null : estimatedLineMinor(choosingLine);
+  return (
+    <WorkspacePage
+      title={pageTitle}
+      back={
+        // b63 (F39): the way back to the table, before and after sending.
+        tableMode && tableReference !== null && tableLabel !== null ? (
+          <Link to="/operations/dining" state={tablesOpenTableState(tableReference)}>
+            {/* Batch 64 (v15 b63 live): through t(), which says a named table as its name; on
+                its own, saidTable's markers reached the link as box glyphs ("‹ ▤K63 A▤"). */}
+            ‹ {t("Table {tableLabel}", { tableLabel: saidTable(tableLabel) })}
+          </Link>
+        ) : undefined
+      }
+      meta={
+        tableMode
+          ? tableHold !== null
+            ? t("{store} · Dine-in · no round can be added to this table now", {
+                store: storeLabel,
+              })
+            : tablePaysLater
+              ? t("{store} · Dine-in · added to the table's bill · the table pays at the end", {
+                  store: storeLabel,
+                })
+              : t(
+                  "{store} · Dine-in · added to the table's order · paid on the store's card machine",
+                  {
+                    store: storeLabel,
+                  },
+                )
+          : t("{store} · Pickup · paid at the counter, card machine or cash", { store: storeLabel })
+      }
+      // Batch 65 (v15 b64: no "Updated" at any width): when the menu was last read; it is read
+      // again quietly every 30 s and after each send, so the stamp moves with it.
+      status={<Freshness status="Fresh" checkedAt={menu.readAt} timeZone={timeZone} />}
+      className="counter-order"
+    >
+      {/* WP-2423 (v15 751dd768): sent counter orders not paid yet, from the server. */}
+      {tableMode ? null : (
+        <CounterAwaitingPayment
+          csrf={csrf}
+          timeZone={timeZone}
+          fetcher={fetcher}
+          refreshKey={awaitingKey}
+          excludeOrderReference={
+            placed !== null && (phase === "Charge" || phase === "Recording")
+              ? placed.orderReference
+              : null
+          }
+          paidOrderReferences={paidHere}
+          onExcludedCancellable={setPlacedCancellable}
+          onCharging={setResumedCharging}
+          keptKey={"counterPaid:" + storeReference}
+        />
+      )}
+      {/* DEC-PAPER-SEND-IDEMPOTENT: a send from before this page was reloaded got no answer. */}
+      {restoredSend !== null && phase === "Building" ? (
+        <p className="order-accept-by" data-tier="warning" role="status">
+          {restoredSend.recordedAfterOutage
+            ? t(
+                "The last paper order sent from this tablet ({time}) got no answer, so it may already be recorded. Enter the same slip and send: the order already recorded comes back, never a second sale. Or look for it in Orders first.",
+                { time: storeTime(restoredSend.sentAt, timeZone) },
+              )
+            : t(
+                "The last order sent from this tablet ({time}) got no answer, so it may already be placed. Enter it again and send: the order already placed comes back, never a second one. Or look for it in Orders first.",
+                { time: storeTime(restoredSend.sentAt, timeZone) },
+              )}
+          {wordGap()}
+          <Link to="/operations/orders">{t("Open Orders")}</Link>
+        </p>
+      ) : null}
+      {roundBack !== null && phase === "Building" && lines.length > 0 ? (
+        <p className="counter-order__round-back" role="status">
+          {t(
+            "Brought back from this device: this table's order, not sent yet. Check it with the guests, then send it.",
+          )}
+          {roundBack.noteKeysLeftOut.length > 0 ? (
+            <>
+              {wordGap()}
+              {roundBack.noteKeysLeftOut.length === 1
+                ? t("1 kitchen note isn't kept on the device; add it again.")
+                : t("{count} kitchen notes aren't kept on the device; add them again.", {
+                    count: roundBack.noteKeysLeftOut.length,
+                  })}
+            </>
+          ) : null}
+        </p>
+      ) : null}
+      <div
+        className="counter-order__layout"
+        // Batch 63 (F42, v3 41:171): once a counter order is sent, its lines take the menu's place
+        // and the payment panel stands beside them.
+        data-sent={placed !== null && !ordering && !tableMode && !placed.payLater ? "" : undefined}
+        // Batch 64 (F42): while a resumed order is charged in its one payment panel above, the
+        // menu and the order being built step aside (they come back as they were on Close).
+        data-resumed-charge={resumedCharging && !tableMode ? "" : undefined}
+      >
+        <section className="counter-order__menu" aria-labelledby="counter-menu-heading">
+          <h2 id="counter-menu-heading" className="counter-order__hidden-heading">
+            {t("Menu")}
+          </h2>
+          <div className="counter-order__menu-bar">
+            <label className="counter-order__search">
+              <span className="counter-order__hidden-heading">
+                {t("Search dishes (Chinese or English)")}
+              </span>
+              <input
+                type="search"
+                value={search}
+                placeholder={t("Search dishes (Chinese or English)")}
+                autoComplete="off"
+                onChange={(event) => setSearch(event.currentTarget.value)}
+                onKeyDown={(event) => {
+                  // A keyboard at the counter: Enter adds the one dish left on the list.
+                  if (event.key !== "Enter") return;
+                  const only = found.flatMap((section) => section.items);
+                  if (only.length === 1 && only[0] && canAdd(only[0])) {
+                    add(only[0]);
+                    setSearch("");
+                  }
+                }}
+              />
+            </label>
+            {search === "" && menu.menu.sections.length + (often.length > 0 ? 1 : 0) > 1 ? (
+              <nav
+                className="counter-order__categories"
+                aria-label={t("Menu categories")}
+                onFocus={(event) => {
+                  // Batch 61 review: with a long menu the row scrolls, and the browser leaves a
+                  // category that is only half hidden where it is, ring cut off. Bring the whole
+                  // category (and its scroll-margin, room for the ring) into the row.
+                  if (event.target !== event.currentTarget)
+                    event.target.scrollIntoView({ block: "nearest", inline: "nearest" });
+                }}
+              >
+                {often.length > 0 ? (
+                  <button
+                    type="button"
+                    aria-current={shownSection === "counter-section-often" ? "true" : undefined}
+                    onClick={() => jumpTo("counter-section-often")}
+                  >
+                    {t("Often ordered")}
+                  </button>
+                ) : null}
+                {menu.menu.sections.map((section) => (
+                  <button
+                    key={section.sectionReference}
+                    type="button"
+                    aria-current={
+                      shownSection === "counter-section-" + section.sectionReference
+                        ? "true"
+                        : undefined
+                    }
+                    onClick={() => jumpTo("counter-section-" + section.sectionReference)}
+                  >
+                    {section.name}
+                  </button>
+                ))}
+              </nav>
+            ) : null}
+          </div>
+          {menu.menu.sections.length === 0 ? (
+            <p className="counter-order__menu-empty">
+              {t(
+                "Nothing is on the menu right now. Check the menu's hours and items on the Menus page.",
+              )}
+            </p>
+          ) : null}
+          {search !== "" && found.length === 0 ? (
+            <p className="counter-order__menu-empty" role="status">
+              {t("No dish matches “{query}”.", { query: search.trim() })}
+            </p>
+          ) : null}
+          {search === "" && often.length > 0 ? (
+            <section
+              id="counter-section-often"
+              className="counter-order__section"
+              aria-label={t("Often ordered")}
+            >
+              <h3>{t("Often ordered")}</h3>
+              <ul className="counter-order__items">{often.map((item) => itemRow(item))}</ul>
+            </section>
+          ) : null}
+          {found.map((section) => (
+            <section
+              key={section.sectionReference}
+              id={`counter-section-${section.sectionReference}`}
+              className="counter-order__section"
+              aria-label={section.name}
+            >
+              <h3>{section.name}</h3>
+              <ul className="counter-order__items">
+                {counterMenuFamilies(section.items).map((family) => {
+                  const single = family.sizes.length === 1 ? family.sizes[0]?.item : undefined;
+                  if (single !== undefined) return itemRow(single);
+                  // Owner 2026-10-26: one row per drink; a tap on a size adds that size.
+                  return (
+                    <li
+                      key={family.key}
+                      className="counter-order__family"
+                      data-available={family.sizes.some((size) => size.item.available)}
+                    >
+                      <span className="counter-order__item-name">
+                        {family.name}
+                        {chineseName(familyOtherName(family)) === null ? null : (
+                          <span className="counter-order__item-other" lang="zh-Hans">
+                            {chineseName(familyOtherName(family))}
+                          </span>
+                        )}
+                      </span>
+                      <span className="counter-order__sizes" role="group" aria-label={family.name}>
+                        {family.sizes.map((size) => (
+                          <button
+                            key={size.item.sellableReference}
+                            type="button"
+                            disabled={!canAdd(size.item)}
+                            aria-label={t("Add {name}", { name: size.item.name })}
+                            data-available={size.item.available}
+                            onClick={() => add(size.item)}
+                          >
+                            <span>
+                              {inOrder(size.item) > 0 ? (
+                                <span className="counter-order__in-order">
+                                  {inOrder(size.item)} ×{" "}
+                                </span>
+                              ) : null}
+                              {size.label}
+                            </span>
+                            <span className="counter-order__item-price">
+                              {itemPrice(size.item)}
+                            </span>
+                          </button>
+                        ))}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          ))}
+        </section>
+
+        <section
+          id="counter-order-ticket"
+          className="counter-order__ticket store-card"
+          aria-labelledby="counter-ticket"
+        >
+          <header className="counter-order__ticket-header">
+            {placed !== null && !ordering && !tableMode && !placed.payLater ? (
+              <p className="counter-order__sent-status">
+                <span
+                  className="counter-order__dot"
+                  data-state={phase === "Paid" || phase === "Accepted" ? "done" : "active"}
+                  aria-hidden="true"
+                />
+                {phase === "Paid" || phase === "Accepted"
+                  ? t("Sent · paid")
+                  : t("Sent · waiting for payment")}
+              </p>
+            ) : null}
+            <h2 id="counter-ticket" ref={ticketHeading} tabIndex={-1}>
+              {placed !== null && !ordering && !tableMode && !placed.payLater
+                ? t("Order {orderNumber}", { orderNumber: placed.orderNumber })
+                : t("Order")}
+            </h2>
+            {sentItemCount > 0 ? (
+              <span className="counter-order__count">
+                {sentItemCount === 1
+                  ? t("1 item")
+                  : t("{itemCount} items", { itemCount: sentItemCount })}
+              </span>
+            ) : null}
+          </header>
+          {lines.length === 0 && guestLines.length > 0 ? null : lines.length === 0 ? (
+            <div className="counter-order__empty">
+              <p className="counter-order__empty-title">{t("No items yet")}</p>
+              <p className="bop-muted">{t("Add items from the menu.")}</p>
+            </div>
+          ) : (
+            <ul className="counter-order__lines" aria-label={t("Items in this order")}>
+              {lines.map((line) => {
+                const each = estimatedLineMinor(line);
+                const setQuantity = (quantity: number) =>
+                  changeLines(
+                    lines.map((other) => (other.key === line.key ? { ...other, quantity } : other)),
+                  );
+                return (
+                  <li key={line.key}>
+                    <span className="counter-order__line-name">
+                      {line.quantity} × {line.item.name}
+                      {line.options.length > 0 ? (
+                        <span className="bop-muted">
+                          {" "}
+                          ·{" "}
+                          {line.options
+                            .map((option) =>
+                              option.quantity > 1
+                                ? `${option.name} × ${option.quantity}`
+                                : option.name,
+                            )
+                            .join(listSeparator())}
+                        </span>
+                      ) : null}
+                      {line.note ? (
+                        <span className="bop-muted">
+                          {" "}
+                          {t("· Note: {note}", { note: line.note })}
+                        </span>
+                      ) : null}
+                    </span>
+                    <span className="counter-order__line-price">
+                      {each === null ? "" : cad(each.toString())}
+                    </span>
+                    {/* WP-2423 D5: once sent, an item is changed by cancelling it on the order. */}
+                    {ordering ? (
+                      <span className="counter-order__line-actions">
+                        <button
+                          type="button"
+                          className="counter-order__step"
+                          disabled={phase !== "Building" || line.quantity <= 1}
+                          aria-label={t("One less {name}", { name: line.item.name })}
+                          onClick={() => setQuantity(line.quantity - 1)}
+                        >
+                          −
+                        </button>
+                        <button
+                          type="button"
+                          className="counter-order__step"
+                          disabled={phase !== "Building" || line.quantity >= 99}
+                          aria-label={t("One more {name}", { name: line.item.name })}
+                          onClick={() => setQuantity(line.quantity + 1)}
+                        >
+                          +
+                        </button>
+                        {/* WP-2423 M53: Change also adds a note for the kitchen, at the counter too; it
+                            also re-chooses a withdrawn choice. */}
+                        <button
+                          type="button"
+                          className="counter-order__change"
+                          disabled={phase !== "Building"}
+                          aria-label={t("Change {name}", { name: line.item.name })}
+                          onClick={() =>
+                            setChoosing({
+                              item: line.item,
+                              choices: Object.fromEntries(
+                                line.item.rules.map((rule) => [
+                                  rule.bindingReference,
+                                  line.options
+                                    .map((option) => option.optionReference)
+                                    .filter((reference) =>
+                                      rule.options.some(
+                                        (option) => option.optionReference === reference,
+                                      ),
+                                    ),
+                                ]),
+                              ),
+                              counts: {
+                                ...defaultCounts(line.item),
+                                ...Object.fromEntries(
+                                  line.options.map((option) => [
+                                    option.optionReference,
+                                    option.quantity,
+                                  ]),
+                                ),
+                              },
+                              quantity: line.quantity,
+                              note: line.note ?? "",
+                              editing: line.key,
+                            })
+                          }
+                        >
+                          {t("Change")}
+                        </button>
+                        <button
+                          type="button"
+                          className="counter-order__remove"
+                          disabled={phase !== "Building"}
+                          aria-label={t("Remove {name}", { name: line.item.name })}
+                          onClick={() =>
+                            changeLines(lines.filter((other) => other.key !== line.key))
+                          }
+                        >
+                          {t("Remove")}
+                        </button>
+                      </span>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {tableMode && ordering && (guestLines.length > 0 || guestCartFailed) ? (
+            <section
+              className="counter-order__guest-lines"
+              aria-labelledby="counter-guest-lines-heading"
+            >
+              <h3 id="counter-guest-lines-heading">
+                {t("From the guests' phones (not sent yet)")}
+              </h3>
+              {guestCartFailed ? (
+                <p className="order-accept-by" data-tier="warning" role="status">
+                  {t(
+                    "The guests' cart couldn't be read just now. Sending still checks it, and nothing is sent twice.",
+                  )}
+                </p>
+              ) : null}
+              {guestCart?.guestPaying === true && guestLines.length > 0 ? (
+                <p className="order-accept-by" data-tier="warning" role="status">
+                  {/* WP-2423 batch 29: at a table that pays at the end nobody pays for a round:
+                      a phone is sending these dishes. */}
+                  {tablePaysLater
+                    ? t(
+                        "A guest is sending these dishes from their phone now. Send when they finish, or ask them.",
+                      )
+                    : t(
+                        "A guest is paying for these dishes on their phone now. Send when they finish, or ask them.",
+                      )}
+                </p>
+              ) : null}
+              <ul className="counter-order__lines" aria-labelledby="counter-guest-lines-heading">
+                {guestLines.map((line) => {
+                  const decision = decisionOf(line);
+                  return (
+                    <li key={line.cartItemReference} data-decision={decision}>
+                      <span className="counter-order__line-name">
+                        <span className="counter-order__guest-dish">
+                          {t("{quantity} × {name}", { quantity: line.quantity, name: line.name })}
+                          {line.options !== "" ? (
+                            <span className="bop-muted"> · {line.options}</span>
+                          ) : null}
+                        </span>
+                        <span className="bop-muted"> · {guestLineAdder(line)}</span>
+                      </span>
+                      <span className="counter-order__line-price">
+                        {decision === "Send" && line.estimateMinor !== null
+                          ? cad(line.estimateMinor.toString())
+                          : ""}
+                      </span>
+                      <span className="counter-order__line-actions counter-order__guest-choice">
+                        {line.unsellable ? (
+                          <span className="order-accept-by" data-tier="warning">
+                            {t("Sold out or off the menu now. It is taken out.")}
+                          </span>
+                        ) : decision === "Send" ? (
+                          <button
+                            type="button"
+                            disabled={phase !== "Building"}
+                            aria-label={t("Take {name} out of this round", { name: line.name })}
+                            onClick={() => decide(line, "Remove")}
+                          >
+                            {t("Take out")}
+                          </button>
+                        ) : (
+                          <>
+                            <span className="bop-muted">{t("Taken out")}</span>
+                            <button
+                              type="button"
+                              disabled={phase !== "Building"}
+                              aria-label={t("Send {name} with this round", { name: line.name })}
+                              onClick={() => decide(line, "Send")}
+                            >
+                              {t("Send with this round")}
+                            </button>
+                          </>
+                        )}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          ) : null}
+          {placed !== null && !ordering && sentGuest.length > 0 ? (
+            <section
+              className="counter-order__guest-lines"
+              aria-labelledby="counter-guest-sent-heading"
+            >
+              <h3 id="counter-guest-sent-heading">
+                {t("From the guests' phones (sent with this round)")}
+              </h3>
+              <ul className="counter-order__lines" aria-labelledby="counter-guest-sent-heading">
+                {sentGuest.map((line) => (
+                  <li key={line.cartItemReference}>
+                    <span className="counter-order__line-name">
+                      <span className="counter-order__guest-dish">
+                        {t("{quantity} × {name}", { quantity: line.quantity, name: line.name })}
+                        {line.options !== "" ? (
+                          <span className="bop-muted"> · {line.options}</span>
+                        ) : null}
+                      </span>
+                      <span className="bop-muted"> · {guestLineAdder(line)}</span>
+                    </span>
+                    <span className="counter-order__line-price">
+                      {line.estimateMinor !== null ? cad(line.estimateMinor.toString()) : ""}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+          <div className="counter-order__ticket-foot">
+            {withdrawn.length > 0 && phase === "Building" ? (
+              <p className="order-accept-by" data-tier="warning" role="alert">
+                {t("No longer offered: {changes}. Tap Change to choose again, or Remove.", {
+                  changes: withdrawn
+                    .map((line) =>
+                      t("{dish} ({options})", {
+                        dish: line.dish,
+                        options: line.options.join(listSeparator()),
+                      }),
+                    )
+                    .join(listSeparator()),
+                })}
+              </p>
+            ) : null}
+            {repriced.length > 0 &&
+            estimate !== null &&
+            lines.length > 0 &&
+            phase === "Building" ? (
+              <p className="order-accept-by" data-tier="warning" role="alert">
+                {t("Prices updated: {changes}. Subtotal now {subtotal}.", {
+                  changes: repriced
+                    .map((line) =>
+                      t("{dish} {old} → {new}", {
+                        dish: line.name,
+                        old: cad(line.beforeMinor.toString()),
+                        new: cad(line.afterMinor.toString()),
+                      }),
+                    )
+                    .join(listSeparator()),
+                  subtotal: cad(estimate.toString()),
+                })}
+              </p>
+            ) : null}
+            {tableMode && ordering && guestSent.length > 0 && roundEstimate !== null ? (
+              <div className="counter-order__totals">
+                {lines.length > 0 && estimate !== null ? (
+                  <p className="counter-order__part">
+                    <span>{t("Your items")}</span>
+                    <span>{cad(estimate.toString())}</span>
+                  </p>
+                ) : null}
+                <p className="counter-order__part">
+                  <span>{t("From the guests' phones")}</span>
+                  <span>{cad((guestEstimate ?? 0n).toString())}</span>
+                </p>
+                <p className="counter-order__subtotal">
+                  <span>{t("Estimated subtotal")}</span>
+                  <span>{cad(roundEstimate.toString())}</span>
+                </p>
+                <p className="counter-order__estimate">
+                  {tableHold !== null
+                    ? t("About {value} before tax.", { value: cad(roundEstimate.toString()) })
+                    : tablePaysLater
+                      ? t(
+                          "About {value} before tax. It goes on the table's bill; the table pays once at the end.",
+                          { value: cad(roundEstimate.toString()) },
+                        )
+                      : t(
+                          "About {value} before tax and tip. The final total comes when you send the order.",
+                          { value: cad(roundEstimate.toString()) },
+                        )}
+                </p>
+              </div>
+            ) : (estimate !== null && lines.length > 0 && (ordering || tableMode)) ||
+              (placed !== null && !ordering && tableMode) ? (
+              <div className="counter-order__totals">
+                {placed !== null && !ordering && sentGuest.length > 0 ? (
+                  // WP-2423 batch 28: the sent round's parts, the guests' dishes it took in too.
+                  (() => {
+                    const fromGuests = sentGuest.reduce<bigint | null>(
+                      (sum, line) =>
+                        sum === null || line.estimateMinor === null
+                          ? null
+                          : sum + line.estimateMinor,
+                      0n,
+                    );
+                    const own = lines.length > 0 ? estimate : 0n;
+                    return (
+                      <>
+                        {lines.length > 0 && estimate !== null ? (
+                          <p className="counter-order__part">
+                            <span>{t("Your items")}</span>
+                            <span>{cad(estimate.toString())}</span>
+                          </p>
+                        ) : null}
+                        {fromGuests !== null ? (
+                          <p className="counter-order__part">
+                            <span>{t("From the guests' phones")}</span>
+                            <span>{cad(fromGuests.toString())}</span>
+                          </p>
+                        ) : null}
+                        {fromGuests !== null && own !== null ? (
+                          <p className="counter-order__subtotal">
+                            <span>{t("Estimated subtotal")}</span>
+                            <span>{cad((own + fromGuests).toString())}</span>
+                          </p>
+                        ) : null}
+                      </>
+                    );
+                  })()
+                ) : estimate !== null && lines.length > 0 && (ordering || tableMode) ? (
+                  <p className="counter-order__subtotal">
+                    {/* Batch 63 (F48): the counter's subtotal is exact; it says once what it
+                        leaves out, never "about" the same figure again. */}
+                    <span>{tableMode ? t("Subtotal") : t("Subtotal (before tax and tip)")}</span>
+                    <span>{cad(estimate.toString())}</span>
+                  </p>
+                ) : null}
+                {ordering && !tableMode ? null : (
+                  <p className="counter-order__estimate">
+                    {placed !== null && !ordering
+                      ? placed.payLater
+                        ? t(
+                            "Sent to the kitchen. {totalMinor} with tax goes on the table's bill.",
+                            {
+                              totalMinor: cad(placed.totalMinor),
+                            },
+                          )
+                        : phase === "Paid" || phase === "Accepted"
+                          ? changeDue !== null
+                            ? t("Sent and paid in cash: {amount} with tax and tip.", {
+                                amount: cad(
+                                  cashTender(BigInt(placed.totalMinor), "").cashDueMinor.toString(),
+                                ),
+                              })
+                            : t("Sent and paid: {totalMinor} with tax and tip.", {
+                                totalMinor: cad(placed.totalMinor),
+                              })
+                          : placed.recordedAfterOutage
+                            ? t(
+                                "Sent. This paper order was paid during the outage: don't charge again, record it below.",
+                              )
+                            : counterCash
+                              ? t(
+                                  "Sent. Take {amount} in cash with tax and tip (rounded to 5 cents).",
+                                  {
+                                    amount: cad(
+                                      cashTender(
+                                        BigInt(placed.totalMinor),
+                                        "",
+                                      ).cashDueMinor.toString(),
+                                    ),
+                                  },
+                                )
+                              : t(
+                                  "Sent. Charge {totalMinor} with tax and tip on the card machine.",
+                                  {
+                                    totalMinor: cad(placed.totalMinor),
+                                  },
+                                )
+                      : tableHold !== null
+                        ? t("About {value} before tax.", {
+                            value: cad((estimate ?? 0n).toString()),
+                          })
+                        : tablePaysLater
+                          ? t(
+                              "About {value} before tax. It goes on the table's bill; the table pays once at the end.",
+                              { value: cad((estimate ?? 0n).toString()) },
+                            )
+                          : t(
+                              "About {value} before tax and tip. The final total comes when you send the order.",
+                              { value: cad((estimate ?? 0n).toString()) },
+                            )}
+                  </p>
+                )}
+              </div>
+            ) : null}
+            {tablePaysLater || tipOptions.length === 0 ? null : (
+              <fieldset className="counter-order__tip" disabled={!ordering}>
+                <legend>{t("Tip")}</legend>
+                {tipOptions.map((value) => (
+                  <label key={value}>
+                    <input
+                      type="radio"
+                      name="counter-tip"
+                      checked={tip === value}
+                      onChange={() => {
+                        newOrderIntent();
+                        setTip(value);
+                      }}
+                    />
+                    {value === "0" ? t("No tip") : `${value}%`}
+                  </label>
+                ))}
+                <label>
+                  <input
+                    type="radio"
+                    name="counter-tip"
+                    checked={tip === "Custom"}
+                    onChange={() => {
+                      newOrderIntent();
+                      setTip("Custom");
+                    }}
+                  />
+                  {t("Other amount")}
+                </label>
+                {tip === "Custom" ? (
+                  <label className="counter-order__custom-tip">
+                    {t("Tip amount ($)")}
+                    <input
+                      inputMode="decimal"
+                      value={customTip}
+                      aria-invalid={tipChoice() === null}
+                      onChange={(event) => {
+                        newOrderIntent();
+                        setCustomTip(event.currentTarget.value);
+                      }}
+                    />
+                  </label>
+                ) : null}
+              </fieldset>
+            )}
+            <fieldset className="counter-order__paper" disabled={!ordering}>
+              <legend className="counter-order__hidden-heading">{t("Paper order")}</legend>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={paper}
+                  onChange={(event) => {
+                    newOrderIntent();
+                    setPaper(event.currentTarget.checked);
+                  }}
+                />
+                {t("Recorded after an outage (taken on paper)")}
+              </label>
+              {/* Once sent, the paid-at is shown and corrected in the charge step below. */}
+              {paper && !tablePaysLater && ordering ? (
+                <label>
+                  {t("Paid at (store time, from the paper order)")}
+                  <input
+                    ref={sendPaidAt}
+                    type="datetime-local"
+                    value={paidAt}
+                    aria-invalid={paperInstant === null || paidAtRefused}
+                    aria-describedby="counter-paper-hint"
+                    onChange={(event) => {
+                      // The paid-at is the payment's, not the order's: the same send stays the
+                      // same order (a corrected time is a new payment, answered as already
+                      // recorded when the first one was).
+                      setPaidAt(event.currentTarget.value);
+                      setPaidAtRefused(false);
+                    }}
+                  />
+                </label>
+              ) : null}
+              {paper && !tablePaysLater && ordering ? (
+                <p id="counter-paper-hint" className="field-hint">
+                  {t(
+                    "Within the last 3 days. The order is marked “Recorded after outage” and its payment counts on the day it was paid.",
+                  )}
+                </p>
+              ) : null}
+              {/* DEC-PAPER-SEND-IDEMPOTENT: another tablet's unanswered send is not known here. */}
+              {paper && !tableMode && ordering ? (
+                <p className="field-hint">
+                  {t(
+                    "Sent this slip from another tablet and got no answer? Look for it in Orders (Recorded after outage, by time and amount) before entering it here.",
+                  )}
+                </p>
+              ) : null}
+              {paper &&
+              !tablePaysLater &&
+              ordering &&
+              paidAtDayNote(paperInstant, Date.now(), timeZone) ? (
+                <p className="order-accept-by" data-tier="warning" role="note">
+                  {paidAtDayNote(paperInstant, Date.now(), timeZone)}
+                </p>
+              ) : null}
+              {/* DEC-PAPER-ORDER-PAID-AT-SEND: how it was paid during the outage, recorded with
+                  the order, so this sale is never left "to charge". */}
+              {paper && !tablePaysLater && ordering ? (
+                <div className="counter-order__paper-paid">
+                  {tableMode ? (
+                    <p className="field-hint">{t("Paid on the card machine during the outage.")}</p>
+                  ) : (
+                    <fieldset className="counter-order__tender">
+                      <legend>{t("How it was paid during the outage")}</legend>
+                      <label>
+                        <input
+                          type="radio"
+                          name="counter-paper-tender"
+                          checked={tender === "CardMachine"}
+                          onChange={() => {
+                            setTender("CardMachine");
+                            setProblem(null);
+                          }}
+                        />
+                        {t("Card machine")}
+                      </label>
+                      <label>
+                        <input
+                          type="radio"
+                          name="counter-paper-tender"
+                          checked={tender === "Cash"}
+                          onChange={() => {
+                            setTender("Cash");
+                            setProblem(null);
+                          }}
+                        />
+                        {t("Cash")}
+                      </label>
+                    </fieldset>
+                  )}
+                  {paperTender === "CardMachine" ? (
+                    <label>
+                      {t("Slip reference (optional)")}
+                      <input
+                        value={slip}
+                        maxLength={40}
+                        autoComplete="off"
+                        aria-invalid={!validSlipReference(slip.trim())}
+                        aria-describedby="counter-paper-slip-hint"
+                        onChange={(event) => {
+                          setSlip(event.currentTarget.value);
+                          clearSlipHeld();
+                        }}
+                      />
+                    </label>
+                  ) : null}
+                  <p id="counter-paper-slip-hint" className="field-hint">
+                    {paperTender === "CardMachine"
+                      ? t(
+                          "Sending records the order and the payment on the slip together. Don't charge the guest again. The slip's approval code, never the card number.",
+                        )
+                      : t(
+                          "Sending records the order and the cash taken during the outage together. Don't take the cash again.",
+                        )}
+                  </p>
+                </div>
+              ) : null}
+            </fieldset>
+            {/* b63 (F39): only while the table has a join code nobody used yet, in one line. */}
+            {tableMode && ordering && tableHold === null && joinCodeShown ? (
+              <p className="field-hint">
+                {t(
+                  "Sending replaces this table's join code that nobody has used yet; guests already at the table stay joined.",
+                )}
+              </p>
+            ) : null}
+            {problem !== null && ordering ? <p role="alert">{problem}</p> : null}
+            {tableHold !== null && phase === "Building" ? (
+              <div className="counter-order__table-hold">
+                <p id="counter-order-table-hold" role="alert">
+                  {(tableHold.state === "CheckingOut" || tableHold.state === "Paid") &&
+                  tableLabel !== null
+                    ? sentences(
+                        staffRoundRefusedText(tableHold.state, tableLabel),
+                        t("Nothing was sent or charged, and this order is still here."),
+                      )
+                    : tableHold.refused}
+                </p>
+                {/* Batch 57 (v15 b56 live): a paid bill never takes a round again, so reading the
+                    table again can't free Send there; the reason's own next step (close the table
+                    and press Cleaned) is the only one offered. A checkout can still be cancelled, a
+                    table marked available or given a code, and a failed read read again. */}
+                {tableHold.state === "Paid" ? null : (
+                  <button
+                    type="button"
+                    disabled={tableHold.state === "Reading"}
+                    onClick={() => void explainTableRefusal(tableHold.refused)}
+                  >
+                    {tableHold.state === "Reading"
+                      ? t("Checking the table…")
+                      : t("Check the table again")}
+                  </button>
+                )}
+                {/* Batch 58 (v15 b57 live): the reason's next step (close the table and press
+                    Cleaned, or Cancel checkout) is on the table's panel on Tables; one link opens
+                    it there, as "Back to Tables" does for a table opened directly. */}
+                {(tableHold.state === "Paid" || tableHold.state === "CheckingOut") &&
+                tableReference !== null ? (
+                  <Link to="/operations/dining" state={tablesOpenTableState(tableReference)}>
+                    {tableLabel === null
+                      ? t("Back to Tables")
+                      : t("Open table {table} on Tables", { table: saidTable(tableLabel) })}
+                  </Link>
+                ) : null}
+              </div>
+            ) : null}
+            {slipHeld !== null && ordering && phase === "Building" && paper ? (
+              <PaperSlipConfirm
+                orderNumber={slipHeld.orderNumber}
+                disabled={!canSend}
+                onConfirm={(confirmation) => {
+                  slipConfirmation.current = confirmation;
+                  void send();
+                }}
+              />
+            ) : null}
+            {alreadyInOrder !== null && ordering ? (
+              <label className="counter-order__already-in-order">
+                <input
+                  type="checkbox"
+                  checked={alreadyInOrderChecked}
+                  onChange={(event) => setAlreadyInOrderChecked(event.currentTarget.checked)}
+                />
+                {alreadyInOrder.orderNumber !== null
+                  ? t("I took the dishes already in order {number} off this list", {
+                      number: alreadyInOrder.orderNumber,
+                    })
+                  : t("I took the dishes already in that order off this list")}
+              </label>
+            ) : null}
+            {problem !== null && ordering && tableCartOffer !== null ? (
+              <TableCartOfferActions
+                offer={tableCartOffer}
+                disabled={!canSend}
+                onSend={(removeUnavailable) =>
+                  void send({ expectedCartVersion: tableCartOffer.cartVersion, removeUnavailable })
+                }
+              />
+            ) : null}
+            {problem !== null && ordering && partyChanged ? (
+              <div className="card-actions counter-order__party-choices">
+                <button
+                  type="button"
+                  disabled={!canSend}
+                  onClick={() =>
+                    void (async () => {
+                      // Staff checked the order with the guests seated now: it is theirs.
+                      const now = await findTableSession();
+                      if (now === undefined) {
+                        setProblem(
+                          t(
+                            "Couldn't check who is at the table now. Check the connection and try again. Nothing was sent or charged.",
+                          ),
+                        );
+                        return;
+                      }
+                      draftParty.current = { session: now };
+                      placeOperation.current = null;
+                      await send();
+                    })()
+                  }
+                >
+                  {t("Send it for the guests at the table now")}
+                </button>
+                <button type="button" onClick={startOver}>
+                  {t("Start over")}
+                </button>
+              </div>
+            ) : null}
+            {problem !== null && ordering && problemNeedsTableCode && tableQrHref !== undefined ? (
+              <p>
+                <Link to={tableQrHref}>{t("Table QR codes")}</Link>
+              </p>
+            ) : null}
+            {ordering ? (
+              <div className="card-actions counter-order__send" ref={sendArea}>
+                <button
+                  type="button"
+                  className="counter-order__primary"
+                  disabled={!canSend}
+                  aria-describedby={tableHold === null ? undefined : "counter-order-table-hold"}
+                  onClick={() => void send()}
+                >
+                  {phase === "Sending"
+                    ? t("Sending…")
+                    : sendAgain
+                      ? t("Send again")
+                      : paper && !tablePaysLater
+                        ? t("Send and record paper order")
+                        : t("Send order")}
+                </button>
+                <SlowWaitNotice busy={phase === "Sending"} />
+              </div>
+            ) : null}
+          </div>
+        </section>
+
+        {ordering && (lines.length > 0 || guestSent.length > 0) && !sendInView ? (
+          // Phone layout only (CSS): the ticket sits below the menu, so a bottom bar keeps the
+          // order's count and estimate in view and takes staff to it to send (with the guests'
+          // lines it takes in, WP-2423 M35).
+          <div className="counter-order__summary-bar">
+            <span className="counter-order__summary-text">
+              <span>
+                {roundCount === 1 ? t("1 item") : t("{itemCount} items", { itemCount: roundCount })}
+              </span>
+              {roundEstimate !== null ? <strong>{cad(roundEstimate.toString())}</strong> : null}
+            </span>
+            <button
+              type="button"
+              className="counter-order__primary"
+              onClick={() => {
+                document
+                  .getElementById("counter-order-ticket")
+                  ?.scrollIntoView({ block: "start", behavior: "smooth" });
+                ticketHeading.current?.focus({ preventScroll: true });
+              }}
+            >
+              {t("View order")}
+            </button>
+          </div>
+        ) : null}
+
+        {placed !== null && !ordering && placed.payLater ? (
+          <section
+            className="counter-order__charge store-card"
+            aria-labelledby="counter-charge"
+            data-phase={phase}
+          >
+            <h2 id="counter-charge" ref={chargeHeading} tabIndex={-1}>
+              {t("Table {value} round sent to the kitchen", {
+                value: saidTable(placed.tableLabel ?? tableLabel ?? ""),
+              })}
+            </h2>
+            {removedNote !== null ? (
+              <p className="order-accept-by" data-tier="warning" role="note">
+                {removedNote}
+              </p>
+            ) : null}
+            {sentGuest.length > 0 ? (
+              <p role="note">
+                {t("This round includes dishes from the guests' phones: {dishes}.", {
+                  dishes: sentGuest
+                    .map((line) =>
+                      t("{quantity} × {name}", { quantity: line.quantity, name: line.name }),
+                    )
+                    .join(listSeparator()),
+                })}
+              </p>
+            ) : null}
+            {/* Batch 66: the order number in its one form ("Order 10", "10 号单"), as Kitchen says. */}
+            <p className="counter-order__order-number">
+              {t("Order {orderNumber}", { orderNumber: placed.orderNumber })}
+            </p>
+            <dl>
+              <div>
+                <dt>{t("Round total incl. tax")}</dt>
+                <dd>
+                  <strong>{cad(placed.orderMinor)}</strong>
+                </dd>
+              </div>
+            </dl>
+            <p role="status">
+              {/* b63 (F39): no tip is chosen yet, so none is promised; the amount says what went on. */}
+              {t("{amount} with tax goes on the table's bill; the table pays at the end.", {
+                amount: cad(placed.orderMinor),
+              })}
+            </p>
+            {paper ? (
+              <p role="note">
+                {t(
+                  "It also shows in the kitchen, marked as from a paper slip. If it was already made, the kitchen marks it done and you mark it served.",
+                )}
+              </p>
+            ) : null}
+            {/* b63 (F39): back to the floor is the step due; the rest are accent words. */}
+            <div className="card-actions counter-order__sent-actions">
+              <Link
+                className="counter-order__sent-primary"
+                to="/operations/dining"
+                state={tableReference === null ? undefined : tablesOpenTableState(tableReference)}
+              >
+                {t("Back to Tables")}
+              </Link>
+              <button type="button" className="counter-order__sent-step" onClick={startOver}>
+                {t("Another order for this table")}
+              </button>
+              <Link className="counter-order__sent-step" to="/operations/orders">
+                {t("Open Orders")}
+              </Link>
+            </div>
+          </section>
+        ) : placed !== null && !ordering ? (
+          <section
+            className="counter-order__charge store-card"
+            aria-labelledby="counter-charge"
+            data-phase={phase}
+          >
+            <h2 id="counter-charge" ref={chargeHeading} tabIndex={-1}>
+              {!tableMode &&
+              !placed.recordedAfterOutage &&
+              !(phase === "Paid" || phase === "Accepted")
+                ? t("Take payment")
+                : phase === "Paid" || phase === "Accepted"
+                  ? tableMode
+                    ? t("Table {value} order paid", {
+                        value: saidTable(placed.tableLabel ?? tableLabel ?? ""),
+                      })
+                    : t("Order {orderNumber} paid", { orderNumber: placed.orderNumber })
+                  : placed.recordedAfterOutage
+                    ? t("Paper order {orderNumber}: its payment isn't recorded yet", {
+                        orderNumber: placed.orderNumber,
+                      })
+                    : counterCash
+                      ? t("Take {amount} in cash", {
+                          amount: cad(
+                            cashTender(BigInt(placed.totalMinor), "").cashDueMinor.toString(),
+                          ),
+                        })
+                      : t("Charge {totalMinor} on the card machine", {
+                          totalMinor: cad(placed.totalMinor),
+                        })}
+            </h2>
+            {removedNote !== null ? (
+              <p className="order-accept-by" data-tier="warning" role="note">
+                {removedNote}
+              </p>
+            ) : null}
+            {sentGuest.length > 0 ? (
+              <p role="note">
+                {t("This round includes dishes from the guests' phones: {dishes}.", {
+                  dishes: sentGuest
+                    .map((line) =>
+                      t("{quantity} × {name}", { quantity: line.quantity, name: line.name }),
+                    )
+                    .join(listSeparator()),
+                })}
+              </p>
+            ) : null}
+            {tableMode ? (
+              <p className="counter-order__order-number">
+                {t("Order {orderNumber}", { orderNumber: placed.orderNumber })}
+              </p>
+            ) : null}
+            {tableMode ? (
+              <dl>
+                <div>
+                  <dt>{t("Order total incl. tax")}</dt>
+                  <dd>{cad(placed.orderMinor)}</dd>
+                </div>
+                {/* Batch 43: a store with tips off shows no "Tip $0.00"; a tip taken always shows. */}
+                {tips?.enabled !== false || placed.tipMinor !== "0" ? (
+                  <div>
+                    <dt>{t("Tip")}</dt>
+                    <dd>{cad(placed.tipMinor)}</dd>
+                  </div>
+                ) : null}
+                {counterCash ? (
+                  // WP-2423 M52: cash is rounded to 5 cents; the order's amount stays as above.
+                  <div>
+                    <dt>
+                      {placed.recordedAfterOutage
+                        ? t("Paid in cash during the outage")
+                        : t("Cash total (rounded to 5 cents)")}
+                    </dt>
+                    <dd>
+                      <strong>
+                        {cad(cashTender(BigInt(placed.totalMinor), "").cashDueMinor.toString())}
+                      </strong>
+                    </dd>
+                  </div>
+                ) : (
+                  <div>
+                    <dt>
+                      {placed.recordedAfterOutage
+                        ? t("Paid on the card machine during the outage")
+                        : phase === "Paid" || phase === "Accepted"
+                          ? t("Amount paid")
+                          : t("To charge")}
+                    </dt>
+                    <dd>
+                      <strong>{cad(placed.totalMinor)}</strong>
+                    </dd>
+                  </div>
+                )}
+                {/* A paper order's change was given during the outage. */}
+                {changeDue !== null &&
+                !placed.recordedAfterOutage &&
+                (phase === "Paid" || phase === "Accepted") ? (
+                  <div>
+                    <dt>{t("Change to give")}</dt>
+                    <dd>
+                      <strong>{cad(changeDue)}</strong>
+                    </dd>
+                  </div>
+                ) : null}
+              </dl>
+            ) : (
+              // Batch 63 (F42): the amount to take, once, large; what it is made of in grey.
+              <>
+                <p className="counter-order__due">
+                  {cad(
+                    counterCash
+                      ? cashTender(BigInt(placed.totalMinor), "").cashDueMinor.toString()
+                      : placed.totalMinor,
+                  )}
+                </p>
+                <p className="counter-order__due-parts">
+                  {placed.tipMinor !== "0"
+                    ? t("Order {order} with tax · tip {tip}", {
+                        order: cad(placed.orderMinor),
+                        tip: cad(placed.tipMinor),
+                      })
+                    : tips?.enabled !== false
+                      ? t("Tax included · no tip")
+                      : t("Tax included")}
+                  {counterCash ? t(" · cash rounded to 5 cents") : ""}
+                </p>
+                {changeDue !== null &&
+                !placed.recordedAfterOutage &&
+                (phase === "Paid" || phase === "Accepted") ? (
+                  <p className="counter-order__change-due">
+                    {t("Change to give: {amount}", { amount: cad(changeDue) })}
+                  </p>
+                ) : null}
+              </>
+            )}
+            {phase === "Charge" || phase === "Recording" ? (
+              <>
+                {(() => {
+                  const notice = paymentWindowNotice({
+                    payBy: placed.payBy ?? "",
+                    now,
+                    tableMode,
+                    timeZone,
+                    paper: placed.recordedAfterOutage,
+                  });
+                  return (
+                    <p
+                      className={tableMode ? "order-accept-by" : "counter-order__deadline"}
+                      data-tier={notice.tier}
+                      role={notice.tier === "urgent" ? "alert" : "note"}
+                    >
+                      {/* Batch 63 (F42): at the counter the time is one short grey line. */}
+                      {tableMode || placed.recordedAfterOutage
+                        ? notice.text
+                        : counterPayByText(placed.payBy ?? "", timeZone, now)}
+                    </p>
+                  );
+                })()}
+                {tableMode || placed.recordedAfterOutage ? null : (
+                  // Batch 63 (F42, v3 41:171): the two steps at the counter, in order.
+                  <ol className="counter-order__steps">
+                    {counterCash ? (
+                      <>
+                        <li>
+                          {t("Take {amount} in cash and count it.", {
+                            amount: cad(
+                              cashTender(BigInt(placed.totalMinor), "").cashDueMinor.toString(),
+                            ),
+                          })}
+                        </li>
+                        <li>{t("Enter what the guest handed you, then record it below.")}</li>
+                      </>
+                    ) : (
+                      <>
+                        <li>
+                          {t("Enter {amount} on the card machine; the guest taps or inserts.", {
+                            amount: cad(placed.totalMinor),
+                          })}
+                        </li>
+                        <li>{t("When the machine says approved, record it below.")}</li>
+                      </>
+                    )}
+                  </ol>
+                )}
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void recordPayment(placed.totalMinor);
+                  }}
+                >
+                  {tableMode ? null : (
+                    // WP-2423 M52 (DEC-COUNTER-CASH): a counter guest pays on the card machine or
+                    // in cash, by the table's cash rules.
+                    <fieldset
+                      className="counter-order__tender"
+                      disabled={phase === "Recording" || cashUnanswered}
+                    >
+                      <legend>
+                        {placed.recordedAfterOutage
+                          ? t("How it was paid during the outage")
+                          : t("How the guest pays")}
+                      </legend>
+                      <label>
+                        <input
+                          type="radio"
+                          name="counter-tender"
+                          checked={tender === "CardMachine"}
+                          onChange={() => {
+                            setTender("CardMachine");
+                            setProblem(null);
+                          }}
+                        />
+                        {t("Card machine")}
+                      </label>
+                      <label>
+                        <input
+                          type="radio"
+                          name="counter-tender"
+                          checked={tender === "Cash"}
+                          onChange={() => {
+                            setTender("Cash");
+                            setProblem(null);
+                          }}
+                        />
+                        {t("Cash")}
+                      </label>
+                    </fieldset>
+                  )}
+                  {counterCash && placed.recordedAfterOutage ? null : counterCash ? (
+                    <CashTenderFields
+                      idPrefix="counter-cash"
+                      showDue={false}
+                      dueMinor={BigInt(placed.totalMinor)}
+                      received={received}
+                      onReceived={(value) => {
+                        setReceived(value);
+                        setProblem(null);
+                      }}
+                      largeChangeConfirmed={largeChangeConfirmed}
+                      onLargeChangeConfirmed={setLargeChangeConfirmed}
+                      unanswered={cashUnanswered}
+                      disabled={phase === "Recording"}
+                    />
+                  ) : (
+                    <>
+                      <label>
+                        {t("Slip reference (optional)")}
+                        <input
+                          value={slip}
+                          maxLength={40}
+                          autoComplete="off"
+                          aria-invalid={!validSlipReference(slip.trim())}
+                          aria-describedby="counter-slip-hint"
+                          onChange={(event) => {
+                            setSlip(event.currentTarget.value);
+                            clearSlipHeld();
+                          }}
+                        />
+                      </label>
+                      <p id="counter-slip-hint" className="field-hint">
+                        {t(
+                          "The approval or reference code on the card machine slip, to match the machine's day total. Never the card number.",
+                        )}
+                      </p>
+                    </>
+                  )}
+                  {placed.recordedAfterOutage ? (
+                    <>
+                      <label>
+                        {t("Paid at (store time, from the paper order)")}
+                        <input
+                          ref={chargePaidAt}
+                          type="datetime-local"
+                          value={paidAt}
+                          disabled={phase === "Recording"}
+                          aria-invalid={paperInstant === null || paidAtRefused}
+                          aria-describedby={
+                            paidAtRefused
+                              ? "counter-charge-paid-at-refused counter-charge-paid-at-hint"
+                              : "counter-charge-paid-at-hint"
+                          }
+                          onChange={(event) => {
+                            setPaidAt(event.currentTarget.value);
+                            if (paidAtRefused) {
+                              setPaidAtRefused(false);
+                              setProblem(null);
+                            }
+                          }}
+                        />
+                      </label>
+                      {paidAtRefused && problem !== null ? (
+                        <p id="counter-charge-paid-at-refused" role="alert">
+                          {problem}
+                        </p>
+                      ) : null}
+                      <p id="counter-charge-paid-at-hint" className="field-hint">
+                        {t(
+                          "Within the last 3 days. If the time was wrong, correct it here and record again.",
+                        )}
+                      </p>
+                      {paidAtDayNote(paperInstant, now, timeZone) !== null ? (
+                        <p className="order-accept-by" data-tier="warning" role="note">
+                          {paidAtDayNote(paperInstant, now, timeZone)}
+                        </p>
+                      ) : null}
+                    </>
+                  ) : null}
+                  {problem !== null && !paidAtRefused ? <p role="alert">{problem}</p> : null}
+                  {slipHeld !== null && placed.recordedAfterOutage && !counterCash ? (
+                    <PaperSlipConfirm
+                      orderNumber={slipHeld.orderNumber}
+                      disabled={phase === "Recording"}
+                      onConfirm={(confirmation) => {
+                        slipConfirmation.current = confirmation;
+                        void recordPayment(placed.totalMinor);
+                      }}
+                    />
+                  ) : null}
+                  <div className="card-actions">
+                    <button
+                      type="submit"
+                      className="counter-order__primary"
+                      disabled={
+                        phase === "Recording" ||
+                        (counterCash
+                          ? !placed.recordedAfterOutage &&
+                            !cashTender(BigInt(placed.totalMinor), received, largeChangeConfirmed)
+                              .ready
+                          : !validSlipReference(slip.trim())) ||
+                        (placed.recordedAfterOutage && paperInstant === null)
+                      }
+                    >
+                      {phase === "Recording"
+                        ? t("Recording…")
+                        : recordAgain && (placed.recordedAfterOutage || !counterCash)
+                          ? t("Record again · {amount}", {
+                              amount: cad(
+                                placed.recordedAfterOutage && counterCash
+                                  ? cashTender(
+                                      BigInt(placed.totalMinor),
+                                      "",
+                                    ).cashDueMinor.toString()
+                                  : placed.totalMinor,
+                              ),
+                            })
+                          : placed.recordedAfterOutage
+                            ? t("Record paper payment · {amount}", {
+                                amount: cad(
+                                  counterCash
+                                    ? cashTender(
+                                        BigInt(placed.totalMinor),
+                                        "",
+                                      ).cashDueMinor.toString()
+                                    : placed.totalMinor,
+                                ),
+                              })
+                            : counterCash
+                              ? t("Cash received · {amount}", {
+                                  amount: cad(
+                                    cashTender(
+                                      BigInt(placed.totalMinor),
+                                      "",
+                                    ).cashDueMinor.toString(),
+                                  ),
+                                })
+                              : t("Paid on card machine · {totalMinor}", {
+                                  totalMinor: cad(placed.totalMinor),
+                                })}
+                    </button>
+                  </div>
+                </form>
+                <p className="bop-muted">
+                  {placed.recordedAfterOutage
+                    ? // DEC-PAPER-ORDER-PAID-AT-SEND: a sale that already happened is recorded, never
+                      // cancelled or charged again; a wrong amount is corrected with a recorded refund.
+                      t(
+                        "Don't charge the guest again. If the total isn't what the paper slip says, record it anyway and tell a manager, who corrects it on Orders with a recorded refund.",
+                      )
+                    : tableMode
+                      ? t(
+                          "Card declined? Try another card. Nothing goes to the kitchen until this is recorded; after {payBy} it can no longer be paid here and must be sent again.",
+                          { payBy: storeTime(placed.payBy ?? "", timeZone) },
+                        )
+                      : counterCash
+                        ? t(
+                            "Count the cash before you record it. Once recorded, it goes back only by cancelling the order or by a refund a manager records.",
+                          )
+                        : placedCancellable === true
+                          ? t(
+                              "Card declined? Try another card. Guest not paying? Cancel the order so its items go back to stock.",
+                            )
+                          : placedCancellable === false
+                            ? t(
+                                "Card declined? Try another card. Guest not paying? Ask a manager to cancel it; otherwise it is released at {payBy}.",
+                                { payBy: storeTime(placed.payBy ?? "", timeZone) },
+                              )
+                            : // WP-2423 M127: who may cancel is still being read; no one is sent to a
+                              // manager (or offered Cancel) before it is known.
+                              t("Card declined? Try another card.")}
+                </p>
+                {!tableMode && placedCancellable === true && !placed.recordedAfterOutage ? (
+                  <div className="card-actions counter-order__charge-links">
+                    <CounterCancelAction
+                      className="counter-order__danger-text"
+                      orderReference={placed.orderReference}
+                      orderBatchReference={placed.orderBatchReference}
+                      orderNumber={placed.orderNumber}
+                      expectedOrderVersion={placed.orderVersion}
+                      csrf={csrf}
+                      {...(fetcher === undefined ? {} : { fetcher })}
+                      onCancelled={startOver}
+                    />
+                    <CounterCancelAction
+                      className="counter-order__accent-text"
+                      label={t("Back to edit")}
+                      defaultReason="COUNTER_ENTERED_WRONG"
+                      orderReference={placed.orderReference}
+                      orderBatchReference={placed.orderBatchReference}
+                      orderNumber={placed.orderNumber}
+                      expectedOrderVersion={placed.orderVersion}
+                      csrf={csrf}
+                      {...(fetcher === undefined ? {} : { fetcher })}
+                      onCancelled={backToEdit}
+                    />
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <p role="status">
+                  {paidNote ??
+                    (changeDue !== null ? t("Paid in cash.") : t("Paid on the card machine."))}
+                </p>
+                <div className="card-actions">
+                  <button
+                    type="button"
+                    className={tableMode ? undefined : "counter-order__primary"}
+                    onClick={startOver}
+                  >
+                    {tableMode ? t("Another order for this table") : t("New counter order")}
+                  </button>
+                  {tableMode ? <Link to="/operations/dining">{t("Back to Tables")}</Link> : null}
+                  <Link to="/operations/orders">{t("Open Orders")}</Link>
+                </div>
+              </>
+            )}
+          </section>
+        ) : null}
+      </div>
+      {choosing !== null && choosingLine !== null ? (
+        <dialog
+          ref={chooseDialog}
+          className="counter-order__choose"
+          onCancel={() => setChoosing(null)}
+          onClick={(event) => {
+            if (event.target === chooseDialog.current) setChoosing(null);
+          }}
+        >
+          <form
+            aria-label={t("Choose {name}", { name: choosing.item.name })}
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!choicesComplete(choosing.item, choosing.choices, choosing.counts)) return;
+              changeLines(
+                choosing.editing === null
+                  ? [...lines, choosingLine]
+                  : lines.map((line) => (line.key === choosing.editing ? choosingLine : line)),
+              );
+              setChoosing(null);
+            }}
+          >
+            {/* Batch 63 (F44, Figma 56:104): each group is one wrapping row of choices, the
+                chosen one a dark pill; quantity is a − 1 + stepper; Add to order stays at the
+                bottom of the dialog, so a drink with four groups is chosen on one screen. */}
+            <div className="counter-order__choose-body">
+              <header className="counter-order__choose-head">
+                <h3 ref={chooseHeading} tabIndex={-1}>
+                  {choosing.item.name}
+                </h3>
+                <span className="counter-order__choose-price">{itemPrice(choosing.item)}</span>
+              </header>
+              {choosing.item.rules.map((rule) => {
+                const single = rule.maximumSelections === 1;
+                const picked = choosing.choices[rule.bindingReference] ?? [];
+                const total = chosenInRule(picked, choosing.counts);
+                return (
+                  <fieldset key={rule.bindingReference}>
+                    <legend>
+                      {rule.name}
+                      {` · ${staffChoiceText(rule)}`}
+                    </legend>
+                    {total > rule.maximumSelections ? (
+                      <p role="status">
+                        {t("{name} allows at most {max}. Choose fewer.", {
+                          name: rule.name,
+                          max: rule.maximumSelections,
+                        })}
+                      </p>
+                    ) : null}
+                    <div className="counter-order__choices">
+                      {rule.options.map((option) => (
+                        <label
+                          key={option.optionReference}
+                          data-chosen={picked.includes(option.optionReference)}
+                        >
+                          <input
+                            type={single ? "radio" : "checkbox"}
+                            name={rule.bindingReference}
+                            checked={picked.includes(option.optionReference)}
+                            disabled={
+                              (option.offeredNow === false &&
+                                !picked.includes(option.optionReference)) ||
+                              (!single &&
+                                !picked.includes(option.optionReference) &&
+                                total >= rule.maximumSelections)
+                            }
+                            onChange={(event) => {
+                              const checked = event.currentTarget.checked;
+                              setChoosing({
+                                ...choosing,
+                                choices: {
+                                  ...choosing.choices,
+                                  [rule.bindingReference]: single
+                                    ? [option.optionReference]
+                                    : checked
+                                      ? [...picked, option.optionReference]
+                                      : picked.filter((value) => value !== option.optionReference),
+                                },
+                              });
+                            }}
+                          />
+                          <span>{option.name}</span>
+                          {option.offeredNow === false ? (
+                            <span className="counter-order__option-price">
+                              {option.soldOut === true
+                                ? t("Sold out today")
+                                : t("Not available now")}
+                            </span>
+                          ) : option.priceMinor !== null && option.priceMinor !== "0" ? (
+                            <span className="counter-order__option-price">
+                              +{cad(option.priceMinor)}
+                            </span>
+                          ) : null}
+                        </label>
+                      ))}
+                    </div>
+                    {/* WP-2423 item 3b: a choice guests can repeat (double pearls) at the table
+                        too; batch 63 (CK-17): a − n + stepper, no keyboard on a tablet. */}
+                    {rule.options
+                      .filter(
+                        (option) =>
+                          option.maximumQuantity > 1 && picked.includes(option.optionReference),
+                      )
+                      .map((option) => {
+                        const count = choosing.counts[option.optionReference] ?? 1;
+                        const most = repeatLimit(
+                          rule,
+                          option.optionReference,
+                          picked,
+                          choosing.counts,
+                        );
+                        const setCount = (value: number) =>
+                          setChoosing({
+                            ...choosing,
+                            counts: {
+                              ...choosing.counts,
+                              [option.optionReference]: Math.min(most, Math.max(1, value)),
+                            },
+                          });
+                        return (
+                          <Stepper
+                            key={option.optionReference}
+                            label={t("How many {name}", { name: option.name })}
+                            name={option.name}
+                            value={count}
+                            min={1}
+                            max={most}
+                            onChange={setCount}
+                          />
+                        );
+                      })}
+                  </fieldset>
+                );
+              })}
+              <Stepper
+                label={t("Quantity")}
+                name={choosing.item.name}
+                value={choosing.quantity}
+                min={1}
+                max={99}
+                onChange={(quantity) =>
+                  setChoosing({ ...choosing, quantity: Math.min(99, Math.max(1, quantity)) })
+                }
+              />
+              {/* WP-2423 M53: the counter takes the guest's note for the kitchen too. */}
+              <label className="counter-order__note">
+                {t("Note for the kitchen (optional)")}
+                <input
+                  value={choosing.note}
+                  maxLength={140}
+                  autoComplete="off"
+                  onChange={(event) =>
+                    setChoosing({ ...choosing, note: event.currentTarget.value })
+                  }
+                />
+              </label>
+            </div>
+            <div className="counter-order__choose-actions">
+              <p className="counter-order__choose-missing" role="status">
+                {missingChoices(choosing.item, choosing.choices, choosing.counts)}
+              </p>
+              <button
+                type="button"
+                className="counter-order__choose-cancel"
+                onClick={() => setChoosing(null)}
+              >
+                {t("Cancel")}
+              </button>
+              <button
+                type="submit"
+                className="counter-order__primary"
+                disabled={!choicesComplete(choosing.item, choosing.choices, choosing.counts)}
+              >
+                {choosing.editing === null ? t("Add to order") : t("Save change")}
+                {choosingMinor === null ? "" : ` · ${cad(choosingMinor.toString())}`}
+              </button>
+            </div>
+          </form>
+        </dialog>
+      ) : null}
+    </WorkspacePage>
   );
 }

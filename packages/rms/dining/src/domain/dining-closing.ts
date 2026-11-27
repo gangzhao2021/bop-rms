@@ -9,6 +9,8 @@ export const diningClosingErrorCodes = [
   "DINING_CLOSING_FINANCIAL_EVIDENCE_INVALID",
   "DINING_CLOSING_TASK_REQUIRED",
   "DINING_CLOSING_DEPENDENCY_UNAVAILABLE",
+  /** Batch 45: this Store has no such table visit (a stale panel after a store switch). */
+  "DINING_CLOSING_SESSION_NOT_FOUND",
 ] as const;
 export type DiningClosingErrorCode = (typeof diningClosingErrorCodes)[number];
 

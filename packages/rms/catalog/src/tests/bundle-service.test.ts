@@ -135,7 +135,7 @@ function fixture(
             effect: "Allow",
             reason: "ROLE_PERMISSION",
             source: "RolePermission",
-            action: "catalog.bundle.manage",
+            action: "catalog.product.update",
             scopeKind: "Brand",
             policySnapshotReference: ids.policy,
             policyVersion: 1,
@@ -147,7 +147,7 @@ function fixture(
                 effect: "Allow",
                 reason: "ROLE_PERMISSION",
                 source: "RolePermission",
-                action: "pricing.bundle.approve",
+                action: "pricing.price_book.approve",
                 scopeKind: "Brand",
                 policySnapshotReference: ids.policy,
                 policyVersion: 1,
@@ -283,6 +283,55 @@ describe("Bundle command service", () => {
       },
     });
     expect(state.records.at(-1)?.event.eventType).toBe("BundleVersionPublished");
+  });
+
+  it("revises a published Bundle by a new draft version only", async () => {
+    const state = fixture();
+    await state.service.create({
+      candidate: candidate(),
+      operationReference: ids.operation,
+      requestedAt: at,
+    });
+    const published = await state.service.publish({
+      bundleReference: ids.bundle,
+      validationDigest: hash("valid"),
+      expectedAggregateVersion: 1,
+      operationReference: id(20),
+      requestedAt: later,
+    });
+    const revisedAt = "2026-08-13T15:02:00.000Z";
+    const revision = (versionReference: string) =>
+      candidate({
+        aggregateVersion: 3,
+        updatedAt: revisedAt,
+        currentVersion: {
+          ...candidate().currentVersion,
+          versionReference,
+          fixedPrice: { currencyCode: "CAD", amountMinor: "1399" },
+          createdAt: revisedAt,
+          updatedAt: revisedAt,
+        },
+      });
+    // The published version itself is never rewritten.
+    await expect(
+      state.service.replaceDraft({
+        candidate: revision(ids.version),
+        expectedAggregateVersion: 2,
+        operationReference: id(21),
+        requestedAt: revisedAt,
+      }),
+    ).rejects.toMatchObject({ code: "CATALOG_INPUT_INVALID" });
+    await expect(
+      state.service.replaceDraft({
+        candidate: revision(id(30)),
+        expectedAggregateVersion: 2,
+        operationReference: id(22),
+        requestedAt: revisedAt,
+      }),
+    ).resolves.toMatchObject({
+      aggregate: { lifecycle: "Draft", aggregateVersion: 3, currentVersion: { status: "Draft" } },
+    });
+    expect(published.aggregate.currentVersion.versionReference).toBe(ids.version);
   });
 
   it("enforces version conflicts and the published lifecycle graph", async () => {

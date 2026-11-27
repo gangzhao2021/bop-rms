@@ -200,6 +200,33 @@ export function sameEffectiveScope(left: EffectiveScope, right: EffectiveScope):
   );
 }
 
+/**
+ * Owner 2026-11-04: building a formatter is slow (about 40% of the time spent listing a menu, which
+ * makes one per recipe rule). A formatter never changes, so each valid time zone keeps its own.
+ */
+const zoneFormatters = new Map<string, Intl.DateTimeFormat>();
+function zoneFormatter(timeZone: string): Intl.DateTimeFormat {
+  const known = zoneFormatters.get(timeZone);
+  if (known !== undefined) return known;
+  try {
+    const formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      fractionalSecondDigits: 3,
+      hourCycle: "h23",
+    });
+    zoneFormatters.set(timeZone, formatter);
+    return formatter;
+  } catch {
+    return fail("EFFECTIVE_PERIOD_TIME_INVALID");
+  }
+}
+
 function createBoundary(input: ZonedBoundary, timeZone: string): ZonedBoundary {
   exact(input, ["instant", "localDateTime", "utcOffsetMinutes"], "EFFECTIVE_PERIOD_TIME_INVALID");
   const instantValue = canonical(input.instant, "EFFECTIVE_PERIOD_TIME_INVALID");
@@ -211,22 +238,7 @@ function createBoundary(input: ZonedBoundary, timeZone: string): ZonedBoundary {
     input.utcOffsetMinutes > 840
   )
     fail("EFFECTIVE_PERIOD_TIME_INVALID");
-  let formatter: Intl.DateTimeFormat;
-  try {
-    formatter = new Intl.DateTimeFormat("en-CA", {
-      timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      fractionalSecondDigits: 3,
-      hourCycle: "h23",
-    });
-  } catch {
-    return fail("EFFECTIVE_PERIOD_TIME_INVALID");
-  }
+  const formatter = zoneFormatter(timeZone);
   const parts = Object.fromEntries(
     formatter
       .formatToParts(new Date(instantValue))
@@ -257,7 +269,14 @@ function createBoundary(input: ZonedBoundary, timeZone: string): ZonedBoundary {
   });
 }
 
+/**
+ * WP-2423 DEC-MERCHANT-LOCK-SCOPE: a period this function produced and froze cannot have changed, so
+ * it is returned as it is (a menu review validated the same period thousands of times). Anything
+ * else, a spread copy included, is new and fully validated.
+ */
+const validatedPeriods = new WeakSet<object>();
 export function createEffectivePeriod(input: EffectivePeriod): EffectivePeriod {
+  if (input !== null && typeof input === "object" && validatedPeriods.has(input)) return input;
   exact(input, ["timeZone", "effectiveFrom", "effectiveUntil"], "EFFECTIVE_PERIOD_TIME_INVALID");
   if (typeof input.timeZone !== "string" || input.timeZone.length < 1)
     fail("EFFECTIVE_PERIOD_TIME_INVALID");
@@ -269,7 +288,13 @@ export function createEffectivePeriod(input: EffectivePeriod): EffectivePeriod {
     Date.parse(effectiveUntil.instant) <= Date.parse(effectiveFrom.instant)
   )
     fail("EFFECTIVE_PERIOD_TIME_INVALID");
-  return Object.freeze({ timeZone: input.timeZone, effectiveFrom, effectiveUntil });
+  const validated: EffectivePeriod = Object.freeze({
+    timeZone: input.timeZone,
+    effectiveFrom,
+    effectiveUntil,
+  });
+  validatedPeriods.add(validated);
+  return validated;
 }
 
 export function createEffectiveConfigurationVersion(

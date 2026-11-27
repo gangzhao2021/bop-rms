@@ -8,3 +8,8 @@ export * from "./projection-rebuild.js";
 export * from "./operational-dashboard.js";
 export * from "./provider-integration-admin.js";
 export { OperationalProjectionError } from "./projection-contract.js";
+
+export {
+  createPostgresOrderExceptionSourceStore,
+  type OrderExceptionTransaction,
+} from "./infrastructure/persistence/order-exception-source-store.js";

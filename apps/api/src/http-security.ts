@@ -31,10 +31,10 @@ export function createHttpRequestLimitMiddleware(): RequestHandler {
       rejectTarget(request, response, next);
       return;
     }
-    if (
-      /%(?:2f|5c)/iu.test(request.originalUrl) ||
-      /(?:^|\/)(?:\.|%2e){1,2}(?:\/|$)/iu.test(request.originalUrl)
-    ) {
+    const queryStart = request.originalUrl.indexOf("?");
+    const pathname =
+      queryStart < 0 ? request.originalUrl : request.originalUrl.slice(0, queryStart);
+    if (/%(?:2f|5c)/iu.test(pathname) || /(?:^|\/)(?:\.|%2e){1,2}(?:\/|$)/iu.test(pathname)) {
       rejectAmbiguous(request, response, next);
       return;
     }

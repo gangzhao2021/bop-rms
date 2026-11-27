@@ -9,7 +9,8 @@ import {
   type PricingReference,
   type TaxCalculationExplanation,
 } from "./money-tax-contract.js";
-import { addMoney, calculateTax } from "./money-tax.js";
+import { addMoney } from "./money-tax.js";
+import { calculateQuoteTax } from "./quote-tax-allocation.js";
 import {
   resolvePrice,
   type PriceBookSnapshot,
@@ -211,7 +212,7 @@ export function createPriceQuote(input: CreatePriceQuoteInput): PriceQuoteSnapsh
   let subtotal = zero(currencyMetadata.currencyCode);
   let tax = zero(currencyMetadata.currencyCode);
   const seen = new Set<string>();
-  const lines = input.lines.map((line) => {
+  const priced = input.lines.map((line) => {
     exact(line, [
       "lineReference",
       "sellableReference",
@@ -253,43 +254,52 @@ export function createPriceQuote(input: CreatePriceQuoteInput): PriceQuoteSnapsh
     if (resolvedPrice.amount.currencyCode !== currencyMetadata.currencyCode)
       fail("QUOTE_CURRENCY_MISMATCH");
     const lineSubtotal = multiply(resolvedPrice.amount, line.quantity);
-    let lineTax = zero(currencyMetadata.currencyCode);
-    const taxLines = taxResolution.rules.map((component) => {
+    for (const component of taxResolution.rules)
       if (component.resolvedRule.priceInclusion !== "Exclusive") fail("QUOTE_UNSUPPORTED_TAX_MODE");
-      const basis = component.compoundOnPriorTax ? addMoney(lineSubtotal, lineTax) : lineSubtotal;
-      const calculated = calculateTax({
-        calculationReference: component.resolvedRule.ruleVersionReference,
-        taxableReference: lineReference,
-        inputAmount: basis,
-        currencyMetadata,
-        resolvedRule: component.resolvedRule,
-      });
-      lineTax = addMoney(lineTax, calculated.taxAmount);
-      return Object.freeze({
-        taxAmount: calculated.taxAmount,
-        explanation: calculated.explanation,
-        calculationOrder: component.calculationOrder,
-        compoundOnPriorTax: component.compoundOnPriorTax,
-        ruleReference: component.resolvedRule.ruleVersionReference,
-      });
-    });
-    subtotal = addMoney(subtotal, lineSubtotal);
-    tax = addMoney(tax, lineTax);
-    const lineZero = zero(currencyMetadata.currencyCode);
-    return Object.freeze({
+    return {
       lineReference,
       sellableReference: reference(line.sellableReference),
       productVersionReference: reference(line.productVersionReference),
       menuVersionReference: reference(line.menuVersionReference),
       quantity: line.quantity,
-      unitPrice: resolvedPrice.amount,
-      subtotal: lineSubtotal,
+      resolvedPrice,
+      taxResolution,
+      lineSubtotal,
+    };
+  });
+  // WP-2423 DEC-TAX-WHOLE-RECEIPT: tax per tax type on the whole quote, allocated to the lines.
+  const allocated = calculateQuoteTax(
+    priced.map((line) => ({
+      lineReference: line.lineReference,
+      subtotal: line.lineSubtotal,
+      rules: line.taxResolution.rules,
+    })),
+    currencyMetadata,
+    "WholeQuote",
+  );
+  const lines = priced.map((line, index) => {
+    const taxLines = allocated[index] ?? [];
+    const lineTax = taxLines.reduce(
+      (sum, entry) => addMoney(sum, entry.taxAmount),
+      zero(currencyMetadata.currencyCode),
+    );
+    subtotal = addMoney(subtotal, line.lineSubtotal);
+    tax = addMoney(tax, lineTax);
+    const lineZero = zero(currencyMetadata.currencyCode);
+    return Object.freeze({
+      lineReference: line.lineReference,
+      sellableReference: line.sellableReference,
+      productVersionReference: line.productVersionReference,
+      menuVersionReference: line.menuVersionReference,
+      quantity: line.quantity,
+      unitPrice: line.resolvedPrice.amount,
+      subtotal: line.lineSubtotal,
       discount: lineZero,
       tax: lineTax,
       fee: lineZero,
-      total: addMoney(lineSubtotal, lineTax),
-      resolvedPrice,
-      taxResolution,
+      total: addMoney(line.lineSubtotal, lineTax),
+      resolvedPrice: line.resolvedPrice,
+      taxResolution: line.taxResolution,
       taxLines: Object.freeze(taxLines),
     });
   });

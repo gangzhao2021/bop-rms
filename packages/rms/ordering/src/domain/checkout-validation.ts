@@ -43,7 +43,7 @@ export interface CheckoutCatalogLineEvidence {
   readonly validatedAt: OrderingInstant;
 }
 
-export interface CheckoutValidationEvidence {
+export interface CheckoutValidationEvidence<V extends 1 | 2 = 1> {
   readonly validationReference: OrderingReference;
   readonly validationIntentHash: OrderingHash;
   readonly guestSessionReference: OrderingReference;
@@ -52,7 +52,7 @@ export interface CheckoutValidationEvidence {
   readonly cartReference: OrderingReference;
   readonly cartVersion: number;
   readonly quoteReference: OrderingReference;
-  readonly quoteVersion: 1;
+  readonly quoteVersion: V;
   readonly quoteInputDigest: OrderingHash;
   readonly orderType: CartOrderType;
   readonly sourceChannel: CartSourceChannel;
@@ -77,18 +77,37 @@ export const checkoutValidationErrorCodes = [
   "CHECKOUT_STORE_CLOSED",
   "CHECKOUT_CAPACITY_UNAVAILABLE",
   "CHECKOUT_FULFILLMENT_UNAVAILABLE",
+  /** WP-2423: the Store's stock cannot make this Cart as it stands (see `line`). */
+  "CHECKOUT_STOCK_SHORT",
   "CHECKOUT_DEPENDENCY_UNAVAILABLE",
 ] as const;
 
 export type CheckoutValidationErrorCode = (typeof checkoutValidationErrorCodes)[number];
 
+/**
+ * WP-2423: the Cart line a checkout refusal is about, so the guest (or staff member) is told which
+ * item to change. `available`: for CHECKOUT_STOCK_SHORT, how many of that item (with its options,
+ * all its lines together) can be made: without `sharedStock`, what the Store's stock makes of it
+ * (0: sold out); with `sharedStock`, how many fit beside the rest of the Cart unchanged (0: none).
+ * Null for CHECKOUT_ITEM_UNAVAILABLE. `sharedStock`: other items in the Cart use the same stock,
+ * so fewer of it fit beside them (see findCheckoutStockShortage).
+ */
+export interface CheckoutLineRefusal {
+  readonly cartItemReference: OrderingReference;
+  readonly available: number | null;
+  readonly sharedStock: boolean;
+}
+
 export class CheckoutValidationError extends Error {
   readonly code: CheckoutValidationErrorCode;
+  /** For CHECKOUT_STOCK_SHORT (always) and CHECKOUT_ITEM_UNAVAILABLE (when known). */
+  readonly line: CheckoutLineRefusal | null;
 
-  constructor(code: CheckoutValidationErrorCode) {
+  constructor(code: CheckoutValidationErrorCode, line: CheckoutLineRefusal | null = null) {
     super("checkout is unavailable");
     this.name = "CheckoutValidationError";
     this.code = code;
+    this.line = line === null ? null : Object.freeze({ ...line });
   }
 }
 
@@ -229,7 +248,10 @@ function fulfillment(value: unknown): CheckoutFulfillmentAccepted {
   }
 }
 
-export function parseCheckoutValidationEvidence(value: unknown): CheckoutValidationEvidence {
+function parseEvidence<V extends 1 | 2>(
+  value: unknown,
+  quoteVersion: V,
+): CheckoutValidationEvidence<V> {
   const raw = exact(value, [
     "validationReference",
     "validationIntentHash",
@@ -249,7 +271,7 @@ export function parseCheckoutValidationEvidence(value: unknown): CheckoutValidat
     "validUntil",
   ]);
   if (
-    raw.quoteVersion !== 1 ||
+    raw.quoteVersion !== quoteVersion ||
     !["DineIn", "Pickup"].includes(String(raw.orderType)) ||
     !["Api", "Pos", "Qr", "Web"].includes(String(raw.sourceChannel)) ||
     !Array.isArray(raw.catalogLines)
@@ -290,7 +312,7 @@ export function parseCheckoutValidationEvidence(value: unknown): CheckoutValidat
       cartReference,
       cartVersion,
       quoteReference,
-      quoteVersion: 1,
+      quoteVersion,
       quoteInputDigest: parseOrderingHash(raw.quoteInputDigest),
       orderType: raw.orderType as CheckoutValidationEvidence["orderType"],
       sourceChannel: raw.sourceChannel as CheckoutValidationEvidence["sourceChannel"],
@@ -303,4 +325,13 @@ export function parseCheckoutValidationEvidence(value: unknown): CheckoutValidat
     if (error instanceof CheckoutValidationError) throw error;
     return invalid();
   }
+}
+
+export function parseCheckoutValidationEvidence(value: unknown): CheckoutValidationEvidence {
+  return parseEvidence(value, 1);
+}
+export function parseConfiguredCheckoutValidationEvidence(
+  value: unknown,
+): CheckoutValidationEvidence<2> {
+  return parseEvidence(value, 2);
 }

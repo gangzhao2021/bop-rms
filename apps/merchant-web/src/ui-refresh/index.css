@@ -1,0 +1,48 @@
+/* WP-2423 merchant UI refresh (2026-10-21): daily-use screens benchmarked against restaurant
+   back-office and kitchen-display products, on the shared @bop-rms/ui tokens. Imported after
+   styles.css so these rules refine the shared baseline without re-ordering it. */
+@import "./nav.css";
+@import "./counter-order.css";
+@import "./kitchen.css";
+@import "./pickup.css";
+@import "./tables.css";
+@import "./exceptions.css";
+@import "./settlement-reports.css";
+@import "./approvals.css";
+@import "./catalog.css";
+@import "./quiet.css";
+/* Home (2026-11-03) also comes after quiet.css: it replaces the older Home rules there. */
+@import "./home.css";
+/* Orders v2 (2026-10-26) comes last: it replaces the older Orders rules in quiet.css. */
+@import "./orders.css";
+/* Orders v3: a table's order round by round, on Orders and Tables. */
+@import "./dining-rounds.css";
+/* Kitchen v3 (2026-10-26) comes after quiet.css for the same reason. */
+@import "./kitchen-v3.css";
+/* Payment and refund v3 (2026-11-04). */
+@import "./refund-payment.css";
+/* M50: printing one region (print-region.ts) without blanking other pages. */
+@import "./print.css";
+/* Batch 63: the shared merchant type scale and page frame, last so it settles the older rules. */
+@import "./shell-63.css";
+
+/* Batch 62 (v15 b61 live, Table QR codes; b61 sweep on Home, Exceptions and the kitchen board):
+   Tab scrolls in only a stop's own box, flush with the window's edge, so the bottom of its ring
+   (3px plus a 3px offset) was cut when it came in from below, and the top when Shift+Tab brought
+   the top bar's language switch back in. The same room around every stop as on Tables, the side
+   navigation and the Orders panel, once for every screen. :where() keeps it the weakest rule, so
+   the screens' own room (the category row's 4px 5px) still applies. Only stops staff Tab to: an
+   element focused by the page itself (tabindex="-1": a heading, the main region) is placed
+   exactly where it was. Nothing moves until something is focused. */
+:where(
+  a[href],
+  button,
+  input,
+  select,
+  textarea,
+  summary,
+  [tabindex]:not([tabindex="-1"]),
+  [contenteditable]:not([contenteditable="false"])
+) {
+  scroll-margin: 8px;
+}

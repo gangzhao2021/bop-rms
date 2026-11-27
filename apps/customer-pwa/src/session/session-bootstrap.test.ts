@@ -1,0 +1,1010 @@
+import { afterEach, it, expect, vi } from "vitest";
+import {
+  recoverCustomerSession,
+  restoreCustomerSession,
+  restoreCustomerSessionUntilAnswered,
+  settleEndedTableVisit,
+} from "./session-bootstrap.js";
+import {
+  getCustomerCsrfCredential,
+  getCheckoutSessionReference,
+  getEndedVisitReceiptAccess,
+  setCustomerCsrfCredential,
+  setEndedVisitReceiptAccess,
+  getMovedTableLabel,
+  setMovedTableLabel,
+  getSettledTableLabel,
+  setSettledTable,
+  getSettledTableReceiptCsrf,
+  getClosedTableOwnReceiptCsrf,
+  getSettledTableStore,
+  getEmptyTableLabel,
+  getEndedTableStore,
+  setEmptyTable,
+  getMovedTableMerged,
+  getEndedTable,
+  isCustomerSessionRestoreUnavailable,
+  setCustomerSessionRestoreUnavailable,
+  setCheckoutSessionReference,
+  subscribeCustomerCsrfContext,
+} from "./customer-transaction-context.js";
+afterEach(() => {
+  setCustomerSessionRestoreUnavailable(false);
+  setCustomerCsrfCredential(null);
+  setEndedVisitReceiptAccess(null);
+  setMovedTableLabel(null);
+  setSettledTable(null);
+  setEmptyTable(null);
+});
+const response = (
+  value: unknown = { schemaVersion: 1, csrfToken: "B".repeat(43) },
+  cache = "no-store",
+) =>
+  new Response(JSON.stringify(value), {
+    headers: { "content-type": "application/json", "cache-control": cache },
+  });
+it("restores only in memory with same-origin cookie, no-store and bounded foreground fetch", async () => {
+  const fetcher = vi.fn().mockResolvedValue(response());
+  expect(await restoreCustomerSession(fetcher)).toBe(true);
+  expect(getCustomerCsrfCredential()).toBe("B".repeat(43));
+  expect(fetcher).toHaveBeenCalledWith(
+    "/api/v1/customer/session/csrf",
+    expect.objectContaining({
+      credentials: "same-origin",
+      cache: "no-store",
+      redirect: "error",
+      headers: { "x-bop-session-bootstrap": "1" },
+    }),
+  );
+});
+it("rejects caching, extra fields and oversized responses", async () => {
+  for (const r of [
+    response(undefined, "public"),
+    response({ schemaVersion: 1, csrfToken: "B".repeat(43), secret: "x" }),
+    response({ csrfToken: "x".repeat(2000) }),
+  ]) {
+    expect(await restoreCustomerSession(vi.fn().mockResolvedValue(r))).toBe(false);
+    expect(getCustomerCsrfCredential()).toBeNull();
+  }
+});
+it("never overwrites a changed session during an in-flight bootstrap", async () => {
+  const fetcher = vi.fn().mockImplementation(async () => {
+    setCustomerCsrfCredential("C".repeat(43));
+    return response();
+  });
+  expect(await restoreCustomerSession(fetcher)).toBe(false);
+  expect(getCustomerCsrfCredential()).toBe("C".repeat(43));
+});
+it("uses an existing foreground context and handles unavailable backend without credential persistence", async () => {
+  const fetcher = vi.fn().mockRejectedValue(new Error("unavailable"));
+  expect(await restoreCustomerSession(fetcher)).toBe(false);
+  setCustomerCsrfCredential("C".repeat(43));
+  expect(await restoreCustomerSession(fetcher)).toBe(true);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+
+const menuContext = {
+  publicStoreReference: "0190fa21-0000-7000-8000-000000000001",
+  channel: "DineIn",
+  locale: "en-CA",
+  brandDisplayName: "DEMO Brand",
+  storeDisplayName: "DEMO Store",
+};
+it("restores public menu context with the same successful foreground session", async () => {
+  const established = vi.fn();
+  expect(
+    await restoreCustomerSession(
+      vi
+        .fn()
+        .mockResolvedValue(response({ schemaVersion: 1, csrfToken: "B".repeat(43), menuContext })),
+      established,
+    ),
+  ).toBe(true);
+  expect(established).toHaveBeenCalledWith(menuContext);
+});
+it("rejects malformed or private context and never restores it after a session change", async () => {
+  for (const context of [
+    null,
+    { ...menuContext, channel: "Delivery" },
+    { ...menuContext, privateReference: "hidden" },
+    { ...menuContext, publicStoreReference: "invalid" },
+  ]) {
+    const established = vi.fn();
+    expect(
+      await restoreCustomerSession(
+        vi
+          .fn()
+          .mockResolvedValue(
+            response({ schemaVersion: 1, csrfToken: "B".repeat(43), menuContext: context }),
+          ),
+        established,
+      ),
+    ).toBe(false);
+    expect(established).not.toHaveBeenCalled();
+    expect(getCustomerCsrfCredential()).toBeNull();
+  }
+  const established = vi.fn();
+  expect(
+    await restoreCustomerSession(
+      vi.fn().mockImplementation(async () => {
+        setCustomerCsrfCredential("C".repeat(43));
+        return response({ schemaVersion: 1, csrfToken: "B".repeat(43), menuContext });
+      }),
+      established,
+    ),
+  ).toBe(false);
+  expect(established).not.toHaveBeenCalled();
+});
+
+it("restores only the server checkout reference in memory without replaying Payment", async () => {
+  const checkoutSessionReference = "0190fa21-0000-7000-8000-000000000002";
+  const fetcher = vi.fn().mockResolvedValue(
+    response({
+      schemaVersion: 1,
+      csrfToken: "B".repeat(43),
+      menuContext,
+      checkoutSessionReference,
+    }),
+  );
+  expect(await restoreCustomerSession(fetcher)).toBe(true);
+  expect(getCheckoutSessionReference()).toBe(checkoutSessionReference);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  setCustomerCsrfCredential(null);
+  expect(getCheckoutSessionReference()).toBeNull();
+});
+it("rejects invalid recovery references before installing any session state", async () => {
+  for (const checkoutSessionReference of [null, "invalid", 3, { secret: "hidden" }]) {
+    expect(
+      await restoreCustomerSession(
+        vi
+          .fn()
+          .mockResolvedValue(
+            response({ schemaVersion: 1, csrfToken: "B".repeat(43), checkoutSessionReference }),
+          ),
+      ),
+    ).toBe(false);
+    expect(getCustomerCsrfCredential()).toBeNull();
+    expect(getCheckoutSessionReference()).toBeNull();
+  }
+});
+
+it("WP-2423 Q10: restores the Session's current order and rejects malformed or private fields", async () => {
+  const currentOrder = {
+    orderReference: "0190fa21-0000-7000-8000-000000000003",
+    orderNumber: "12",
+    orderType: "Pickup",
+  };
+  const onOrder = vi.fn();
+  expect(
+    await restoreCustomerSession(
+      vi
+        .fn()
+        .mockResolvedValue(
+          response({ schemaVersion: 1, csrfToken: "B".repeat(43), currentOrder, menuContext }),
+        ),
+      undefined,
+      onOrder,
+    ),
+  ).toBe(true);
+  expect(onOrder).toHaveBeenCalledWith(currentOrder);
+  for (const malformed of [
+    { ...currentOrder, orderNumber: "0" },
+    { ...currentOrder, orderType: "Delivery" },
+    { ...currentOrder, guestSessionReference: "hidden" },
+    { orderReference: currentOrder.orderReference },
+  ]) {
+    setCustomerCsrfCredential(null);
+    const rejected = vi.fn();
+    expect(
+      await restoreCustomerSession(
+        vi
+          .fn()
+          .mockResolvedValue(
+            response({ schemaVersion: 1, csrfToken: "B".repeat(43), currentOrder: malformed }),
+          ),
+        undefined,
+        rejected,
+      ),
+    ).toBe(false);
+    expect(rejected).not.toHaveBeenCalled();
+    expect(getCustomerCsrfCredential()).toBeNull();
+  }
+});
+
+it("treats a first visit or an ended visit (204, no usable Guest Session) as nothing to restore", async () => {
+  const fetcher = vi
+    .fn()
+    .mockResolvedValue(
+      new Response(null, { status: 204, headers: { "cache-control": "no-store" } }),
+    );
+  expect(await restoreCustomerSession(fetcher)).toBe(false);
+  expect(getCustomerCsrfCredential()).toBeNull();
+});
+
+it("WP-2423 (v15 3cd0f8dd M5): keeps an ended visit's receipt access apart, restoring nothing else", async () => {
+  const order = {
+    orderReference: "018f8a00-0000-7000-8000-000000000016",
+    orderNumber: "22",
+    orderType: "DineIn",
+  };
+  const fetcher = vi.fn().mockResolvedValue(
+    response({
+      schemaVersion: 1,
+      endedVisit: {
+        csrfToken: "C".repeat(43),
+        order,
+        receiptAvailableUntil: "2026-10-18T18:01:49.437Z",
+      },
+    }),
+  );
+  const menu = vi.fn(),
+    current = vi.fn();
+  expect(await restoreCustomerSession(fetcher, menu, current)).toBe(false);
+  expect(getCustomerCsrfCredential()).toBeNull();
+  expect(menu).not.toHaveBeenCalled();
+  expect(current).not.toHaveBeenCalled();
+  const before = Date.parse("2026-10-18T18:00:00.000Z");
+  expect(getEndedVisitReceiptAccess(order.orderReference, before)?.csrfToken).toBe("C".repeat(43));
+  // Only for that order, only until its bound, and gone once a new visit starts.
+  expect(getEndedVisitReceiptAccess("018f8a00-0000-7000-8000-000000000017", before)).toBeNull();
+  expect(
+    getEndedVisitReceiptAccess(order.orderReference, Date.parse("2026-10-18T18:01:49.437Z")),
+  ).toBeNull();
+  setCustomerCsrfCredential("D".repeat(43));
+  expect(getEndedVisitReceiptAccess(order.orderReference, before)).toBeNull();
+});
+
+it("v15 2026-10-30: keeps where a moved party sits, restoring nothing to act with", async () => {
+  const fetcher = vi
+    .fn()
+    .mockResolvedValue(response({ schemaVersion: 1, movedTable: { tableLabel: "DEMO-02" } }));
+  const menu = vi.fn();
+  expect(await restoreCustomerSession(fetcher, menu)).toBe(false);
+  expect(getCustomerCsrfCredential()).toBeNull();
+  expect(menu).not.toHaveBeenCalled();
+  expect(getMovedTableLabel()).toBe("DEMO-02");
+  // Joining a table (a new visit token) forgets it.
+  setCustomerCsrfCredential("D".repeat(43));
+  expect(getMovedTableLabel()).toBeNull();
+  setCustomerCsrfCredential(null);
+  // Anything but a plain table label is ignored.
+  for (const movedTable of [{ tableLabel: "<b>" }, { tableLabel: "T7", extra: 1 }, "T7", null]) {
+    fetcher.mockResolvedValue(response({ schemaVersion: 1, movedTable }));
+    expect(await restoreCustomerSession(fetcher)).toBe(false);
+    expect(getMovedTableLabel()).toBeNull();
+  }
+});
+
+it("keeps that a guest's table was settled, with the value that reads its receipt", async () => {
+  const fetcher = vi.fn().mockResolvedValue(
+    response({
+      schemaVersion: 1,
+      settledTable: { tableLabel: "DEMO-02", csrfToken: "C".repeat(43) },
+    }),
+  );
+  const menu = vi.fn();
+  expect(await restoreCustomerSession(fetcher, menu)).toBe(false);
+  // Nothing to order or pay with.
+  expect(getCustomerCsrfCredential()).toBeNull();
+  expect(menu).not.toHaveBeenCalled();
+  expect(getSettledTableLabel()).toBe("DEMO-02");
+  expect(getSettledTableReceiptCsrf()).toBe("C".repeat(43));
+  // A new visit forgets it.
+  setCustomerCsrfCredential("D".repeat(43));
+  expect(getSettledTableLabel()).toBeNull();
+  expect(getSettledTableReceiptCsrf()).toBeNull();
+  setCustomerCsrfCredential(null);
+  // Anything malformed is ignored.
+  for (const settledTable of [
+    { tableLabel: "<b>", csrfToken: "C".repeat(43) },
+    { tableLabel: "T7", csrfToken: "short" },
+    { tableLabel: "T7" },
+    { tableLabel: "T7", csrfToken: "C".repeat(43), extra: 1 },
+    { tableLabel: "T7", csrfToken: "C".repeat(43), store: { storeDisplayName: "Only one" } },
+    {
+      tableLabel: "T7",
+      csrfToken: "C".repeat(43),
+      store: { brandDisplayName: "B", storeDisplayName: " " },
+    },
+    "T7",
+    null,
+  ]) {
+    fetcher.mockResolvedValue(response({ schemaVersion: 1, settledTable }));
+    expect(await restoreCustomerSession(fetcher)).toBe(false);
+    expect(getSettledTableLabel()).toBeNull();
+  }
+});
+
+// Batch 44 (v15 b43 live, h-ended-reload-header-en-390.png): after the table was settled and
+// cleaned, a reload of Your table showed "Order / Scan the location QR code to begin". A newer
+// server names the Store with the settled table, and the page keeps it; an older one doesn't.
+it("batch 44: keeps the settled table's Store names for the header, when the restore gives them", async () => {
+  const store = {
+    brandDisplayName: "Test Merchant 2 - not production",
+    storeDisplayName: "Test Merchant 2 Main - not production",
+  };
+  expect(
+    await restoreCustomerSession(
+      vi.fn().mockResolvedValue(
+        response({
+          schemaVersion: 1,
+          settledTable: { tableLabel: "L43W A (TEST)", csrfToken: "C".repeat(43), store },
+        }),
+      ),
+    ),
+  ).toBe(false);
+  expect(getCustomerCsrfCredential()).toBeNull();
+  expect(getSettledTableLabel()).toBe("L43W A (TEST)");
+  expect(getSettledTableStore()).toEqual(store);
+  setCustomerCsrfCredential("D".repeat(43));
+  expect(getSettledTableStore()).toBeNull();
+  setCustomerCsrfCredential(null);
+  expect(
+    await restoreCustomerSession(
+      vi.fn().mockResolvedValue(
+        response({
+          schemaVersion: 1,
+          settledTable: { tableLabel: "L43W A (TEST)", csrfToken: "C".repeat(43) },
+        }),
+      ),
+    ),
+  ).toBe(false);
+  expect(getSettledTableLabel()).toBe("L43W A (TEST)");
+  expect(getSettledTableStore()).toBeNull();
+  setCustomerCsrfCredential("D".repeat(43));
+  setCustomerCsrfCredential(null);
+});
+
+// Batch 45 (v15 b44 live, v-d-V1-390-ended-reload.png): staff closed and cleaned a table where
+// nothing was ordered; the restore says so (with the Store for the header) instead of "no visit".
+it("batch 45: keeps a table closed with nothing ordered, and a moved party's Store", async () => {
+  const store = {
+    brandDisplayName: "Test Merchant 2 - not production",
+    storeDisplayName: "Test Merchant 2 Main - not production",
+  };
+  const restore = (value: unknown) =>
+    restoreCustomerSession(vi.fn().mockResolvedValue(response(value)));
+  expect(
+    await restore({ schemaVersion: 1, emptyTable: { tableLabel: "V44 A (TEST)", store } }),
+  ).toBe(false);
+  expect(getCustomerCsrfCredential()).toBeNull();
+  expect(getEmptyTableLabel()).toBe("V44 A (TEST)");
+  expect(getSettledTableLabel()).toBeNull();
+  expect(getSettledTableReceiptCsrf()).toBeNull();
+  expect(getEndedTableStore()).toEqual(store);
+  // A new visit forgets it.
+  setCustomerCsrfCredential("D".repeat(43));
+  expect(getEmptyTableLabel()).toBeNull();
+  expect(getEndedTableStore()).toBeNull();
+  setCustomerCsrfCredential(null);
+  // Without names (an unreadable profile) the table is still known; malformed answers are not.
+  expect(await restore({ schemaVersion: 1, emptyTable: { tableLabel: "V44 A (TEST)" } })).toBe(
+    false,
+  );
+  expect(getEmptyTableLabel()).toBe("V44 A (TEST)");
+  expect(getEndedTableStore()).toBeNull();
+  setEmptyTable(null);
+  for (const bad of [
+    { tableLabel: "<b>" },
+    { tableLabel: "V44 A (TEST)", store: { brandDisplayName: "", storeDisplayName: "x" } },
+    { tableLabel: "V44 A (TEST)", csrfToken: "C".repeat(43) },
+  ]) {
+    expect(await restore({ schemaVersion: 1, emptyTable: bad })).toBe(false);
+    expect(getEmptyTableLabel()).toBeNull();
+  }
+  // A party moved or merged to another table: where it sits, and the Store for the header.
+  expect(
+    await restore({ schemaVersion: 1, movedTable: { tableLabel: "H4", merged: true, store } }),
+  ).toBe(false);
+  expect(getMovedTableLabel()).toBe("H4");
+  expect(getMovedTableMerged()).toBe(true);
+  expect(getEndedTableStore()).toEqual(store);
+  setMovedTableLabel(null);
+  expect(await restore({ schemaVersion: 1, movedTable: { tableLabel: "H4", store } })).toBe(false);
+  expect(getMovedTableLabel()).toBe("H4");
+  expect(getMovedTableMerged()).toBe(false);
+  expect(getEndedTableStore()).toEqual(store);
+});
+
+// M02 (v15 07b7a1b7): a reloaded table page stays at its own table.
+it("M02: restores a dine-in visit's table and joined state, only at a table and well formed", async () => {
+  const menuContext = {
+    publicStoreReference: "0190fa21-0000-7000-8000-000000000001",
+    channel: "DineIn",
+    locale: "en-CA",
+    brandDisplayName: "Lane Brand",
+    storeDisplayName: "Lane Dessert",
+  };
+  const visit = { publicTableReference: "0190fa21-0000-7000-8000-000000000009", joined: true };
+  const onVisit = vi.fn();
+  expect(
+    await restoreCustomerSession(
+      vi
+        .fn()
+        .mockResolvedValue(
+          response({ schemaVersion: 1, csrfToken: "B".repeat(43), menuContext, visit }),
+        ),
+      undefined,
+      undefined,
+      onVisit,
+    ),
+  ).toBe(true);
+  expect(onVisit).toHaveBeenCalledWith(visit);
+  for (const body of [
+    { menuContext, visit: { ...visit, joined: "yes" } },
+    { menuContext, visit: { ...visit, extra: 1 } },
+    { menuContext: { ...menuContext, channel: "Pickup" }, visit },
+  ]) {
+    setCustomerCsrfCredential(null);
+    const rejected = vi.fn();
+    expect(
+      await restoreCustomerSession(
+        vi
+          .fn()
+          .mockResolvedValue(response({ schemaVersion: 1, csrfToken: "B".repeat(43), ...body })),
+        undefined,
+        undefined,
+        rejected,
+      ),
+    ).toBe(false);
+    expect(rejected).not.toHaveBeenCalled();
+    expect(getCustomerCsrfCredential()).toBeNull();
+  }
+});
+
+it("M104 B.2: restores this visit's earlier orders under the latest, and refuses a malformed list", async () => {
+  const currentOrder = {
+    orderReference: "0190fa21-0000-7000-8000-000000000003",
+    orderNumber: "12",
+    orderType: "Pickup",
+  };
+  const earlier = {
+    orderReference: "0190fa21-0000-7000-8000-000000000002",
+    orderNumber: "11",
+    orderType: "Pickup",
+  };
+  const restore = (body: object, onOrder = vi.fn()) =>
+    restoreCustomerSession(
+      vi
+        .fn()
+        .mockResolvedValue(
+          response({ schemaVersion: 1, csrfToken: "B".repeat(43), menuContext, ...body }),
+        ),
+      undefined,
+      onOrder,
+    );
+  const onOrder = vi.fn();
+  expect(await restore({ currentOrder, earlierOrders: [earlier] }, onOrder)).toBe(true);
+  expect(onOrder).toHaveBeenCalledWith({ ...currentOrder, earlier: [earlier] });
+  for (const body of [
+    { currentOrder, earlierOrders: [] },
+    { currentOrder, earlierOrders: [{ ...earlier, orderNumber: "0" }] },
+    { earlierOrders: [earlier] },
+  ]) {
+    setCustomerCsrfCredential(null);
+    expect(await restore(body)).toBe(false);
+  }
+});
+
+it("WP-2423 (rush-reads-and-orders-changes): a restore the store could not answer leaves the visit unknown, never ended, and is asked again", async () => {
+  // v15 2026-11-13: the restore of a pickup guest who reloaded in a rush was answered busy (or
+  // not in 5 s); the page read that as no visit and Checkout said the session had ended.
+  const busy = new Response(JSON.stringify({ schemaVersion: 1 }), {
+    status: 503,
+    headers: { "retry-after": "5", "content-type": "application/json" },
+  });
+  expect(await restoreCustomerSession(vi.fn().mockResolvedValue(busy))).toBe(false);
+  expect(getCustomerCsrfCredential()).toBeNull();
+  expect(isCustomerSessionRestoreUnavailable()).toBe(true);
+  // No answer in time (the request timed out or the network failed) is the same: not known.
+  setCustomerSessionRestoreUnavailable(false);
+  expect(await restoreCustomerSession(vi.fn().mockRejectedValue(new Error("timeout")))).toBe(false);
+  expect(isCustomerSessionRestoreUnavailable()).toBe(true);
+  // Asked again (once, however many ask), with the longer wait of a read in a rush.
+  const fetcher = vi.fn().mockResolvedValue(response());
+  await Promise.all([recoverCustomerSession(fetcher), recoverCustomerSession(fetcher)]);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(getCustomerCsrfCredential()).toBe("B".repeat(43));
+  expect(isCustomerSessionRestoreUnavailable()).toBe(false);
+  // With the credential back nothing is asked again.
+  await recoverCustomerSession(fetcher);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+
+it("WP-2423 (rush-reads-and-orders-changes): the store's own answer settles it: no visit is no visit", async () => {
+  setCustomerSessionRestoreUnavailable(true);
+  const none = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+  await recoverCustomerSession(none);
+  expect(none).toHaveBeenCalledTimes(1);
+  expect(getCustomerCsrfCredential()).toBeNull();
+  expect(isCustomerSessionRestoreUnavailable()).toBe(false);
+  // Nothing more to ask: the store said there is no visit.
+  await recoverCustomerSession(none);
+  expect(none).toHaveBeenCalledTimes(1);
+  // A refusal (401) is an answer too.
+  setCustomerSessionRestoreUnavailable(false);
+  expect(
+    await restoreCustomerSession(vi.fn().mockResolvedValue(new Response(null, { status: 401 }))),
+  ).toBe(false);
+  expect(isCustomerSessionRestoreUnavailable()).toBe(false);
+});
+
+it("WP-2423 (rush-reads-and-orders-changes review): every page waits for the store's answer, says busy meanwhile, and starts with the restored menu, order and table", async () => {
+  // v15 2026-11-13 review: a reload of /menu (or /checkout, then Menu) in a rush started the page
+  // with no menu context, so it said "Scan the location QR code" while the visit was alive.
+  const busy = () =>
+    new Response(JSON.stringify({ schemaVersion: 1 }), {
+      status: 503,
+      headers: { "retry-after": "5", "content-type": "application/json" },
+    });
+  const answered = response({
+    schemaVersion: 1,
+    csrfToken: "D".repeat(43),
+    menuContext: {
+      publicStoreReference: "018f8904-0000-7000-8000-000000000004",
+      channel: "DineIn",
+      locale: "en-CA",
+      brandDisplayName: "Brand",
+      storeDisplayName: "Store",
+    },
+    currentOrder: {
+      orderReference: "018f8904-0000-7000-8000-000000000005",
+      orderNumber: "7",
+      orderType: "DineIn",
+    },
+    visit: { publicTableReference: "018f8904-0000-7000-8000-000000000006", joined: true },
+  });
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(busy())
+    .mockRejectedValueOnce(new Error("timeout"))
+    .mockResolvedValueOnce(answered);
+  const restored: string[] = [];
+  const timeouts: number[] = [];
+  const waits: number[] = [];
+  let busyShown = 0;
+  await restoreCustomerSessionUntilAnswered({
+    restore: async (timeoutMs) => {
+      timeouts.push(timeoutMs);
+      return restoreCustomerSession(
+        fetcher,
+        (context) => restored.push("menu " + context.storeDisplayName),
+        (order) => restored.push("order " + order.orderNumber),
+        (visit) => restored.push("table " + String(visit.joined)),
+        { timeoutMs },
+      );
+    },
+    onBusy: () => {
+      busyShown += 1;
+    },
+    sleep: async (milliseconds) => {
+      waits.push(milliseconds);
+    },
+  });
+  expect(busyShown).toBe(2);
+  expect(waits).toEqual([5000, 5000]);
+  // The first ask waits 5 s, the asks again as long as a read in a rush may take.
+  expect(timeouts).toEqual([5000, 14_000, 14_000]);
+  expect(restored).toEqual(["menu Store", "order 7", "table true"]);
+  expect(getCustomerCsrfCredential()).toBe("D".repeat(43));
+  expect(isCustomerSessionRestoreUnavailable()).toBe(false);
+});
+
+it("WP-2423 (rush-reads-and-orders-changes review): a store that answers at once, or says there is no visit, shows no busy page; Try again asks at once", async () => {
+  let busyShown = 0;
+  await restoreCustomerSessionUntilAnswered({
+    restore: (timeoutMs) =>
+      restoreCustomerSession(
+        vi.fn().mockResolvedValue(new Response(null, { status: 204 })),
+        undefined,
+        undefined,
+        undefined,
+        { timeoutMs },
+      ),
+    onBusy: () => {
+      busyShown += 1;
+    },
+  });
+  expect(busyShown).toBe(0);
+  expect(isCustomerSessionRestoreUnavailable()).toBe(false);
+  // Try again wakes the wait at once (no 5 s timer is needed).
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(new Response(null, { status: 503 }))
+    .mockResolvedValueOnce(new Response(null, { status: 204 }));
+  await restoreCustomerSessionUntilAnswered({
+    restore: (timeoutMs) =>
+      restoreCustomerSession(fetcher, undefined, undefined, undefined, { timeoutMs }),
+    onBusy: (retryNow) => {
+      busyShown += 1;
+      retryNow();
+    },
+    sleep: (_milliseconds, wake) => wake,
+  });
+  expect(busyShown).toBe(1);
+  expect(fetcher).toHaveBeenCalledTimes(2);
+});
+
+// Batch 46 (v15 b45 live): every guest tab reads one answer for how the table visit ended, and a
+// moved or merged party that had ordered nothing is told so.
+it("batch 46: one ended-table answer for every tab, with a moved party that ordered nothing", async () => {
+  const store = {
+    brandDisplayName: "Test Merchant 2 - not production",
+    storeDisplayName: "Test Merchant 2 Main - not production",
+  };
+  const restore = (value: unknown) =>
+    restoreCustomerSession(vi.fn().mockResolvedValue(response(value)));
+  expect(getEndedTable()).toBeNull();
+  await restore({
+    schemaVersion: 1,
+    movedTable: { tableLabel: "E45 A (TEST)", merged: true, nothingOrdered: true, store },
+  });
+  expect(getEndedTable()).toEqual({
+    kind: "Moved",
+    tableLabel: "E45 A (TEST)",
+    merged: true,
+    nothingOrdered: true,
+    store,
+  });
+  setMovedTableLabel(null);
+  // Only "true" is an answer; anything else is malformed and says nothing.
+  for (const nothingOrdered of [false, "yes", 1]) {
+    await restore({ schemaVersion: 1, movedTable: { tableLabel: "E45 A (TEST)", nothingOrdered } });
+    expect(getEndedTable()).toBeNull();
+  }
+  await restore({ schemaVersion: 1, emptyTable: { tableLabel: "E45 A (TEST)", store } });
+  expect(getEndedTable()).toEqual({ kind: "Empty", tableLabel: "E45 A (TEST)", store });
+  setEmptyTable(null);
+  await restore({
+    schemaVersion: 1,
+    settledTable: { tableLabel: "12", csrfToken: "C".repeat(43) },
+  });
+  expect(getEndedTable()).toEqual({ kind: "Settled", tableLabel: "12", store: null });
+  // A visit on this phone again: nothing ended.
+  setCustomerCsrfCredential("D".repeat(43));
+  expect(getEndedTable()).toBeNull();
+});
+
+// Batch 55 review (v15 b54, order 59): staff closed the bill when the guests left, then the
+// table. The restore says so (no receipt access), and every tab shows how the bill ended.
+it("batch 55 review: keeps a table whose bill staff closed, with what was paid and no receipt", async () => {
+  const store = {
+    brandDisplayName: "Test Merchant 2 - not production",
+    storeDisplayName: "Test Merchant 2 Main - not production",
+  };
+  const restore = (value: unknown) =>
+    restoreCustomerSession(vi.fn().mockResolvedValue(response(value)));
+  expect(
+    await restore({
+      schemaVersion: 1,
+      closedTable: { tableLabel: "L54 GB2 (TEST)", paid: "Nothing", store },
+    }),
+  ).toBe(false);
+  expect(getCustomerCsrfCredential()).toBeNull();
+  expect(getEndedTable()).toEqual({
+    kind: "ClosedByStaff",
+    tableLabel: "L54 GB2 (TEST)",
+    paid: "Nothing",
+    store,
+  });
+  expect(getSettledTableLabel()).toBeNull();
+  expect(getSettledTableReceiptCsrf()).toBeNull();
+  expect(getEndedTableStore()).toEqual(store);
+  setEmptyTable(null);
+  await restore({ schemaVersion: 1, closedTable: { tableLabel: "L54 GB2 (TEST)", paid: "Some" } });
+  expect(getEndedTable()).toEqual({
+    kind: "ClosedByStaff",
+    tableLabel: "L54 GB2 (TEST)",
+    paid: "Some",
+    store: null,
+  });
+  // A new visit forgets it.
+  setCustomerCsrfCredential("D".repeat(43));
+  expect(getEndedTable()).toBeNull();
+  setCustomerCsrfCredential(null);
+  for (const bad of [
+    { tableLabel: "L54 GB2 (TEST)" },
+    { tableLabel: "L54 GB2 (TEST)", paid: "All" },
+    { tableLabel: "<b>", paid: "Nothing" },
+    { tableLabel: "L54 GB2 (TEST)", paid: "Nothing", csrfToken: "C".repeat(43) },
+  ]) {
+    expect(await restore({ schemaVersion: 1, closedTable: bad })).toBe(false);
+    expect(getEndedTable()).toBeNull();
+  }
+});
+
+// Batch 59 (v15 b58 live, L58R B order 23): all of part 1 went back to the card, then staff
+// cleaned the table. The restore says so ("Refunded"), to the payer with what went back to its
+// card and to another phone with nothing of anyone's; an older page never sees the value.
+it("batch 59: keeps a closed bill all of whose payments went back, on every phone", async () => {
+  const restore = (value: unknown) =>
+    restoreCustomerSession(vi.fn().mockResolvedValue(response(value)));
+  expect(
+    await restore({
+      schemaVersion: 1,
+      closedTable: { tableLabel: "L58R B (TEST)", paid: "Refunded" },
+    }),
+  ).toBe(false);
+  expect(getEndedTable()).toEqual({
+    kind: "ClosedByStaff",
+    tableLabel: "L58R B (TEST)",
+    paid: "Refunded",
+    store: null,
+  });
+  setEmptyTable(null);
+  await restore({
+    schemaVersion: 1,
+    closedTable: {
+      tableLabel: "L58R B (TEST)",
+      paid: "Refunded",
+      yourPayment: { amountMinor: "1413", method: "Online", refundedMinor: "1413" },
+      csrfToken: "C".repeat(43),
+    },
+  });
+  expect(getEndedTable()).toEqual({
+    kind: "ClosedByStaff",
+    tableLabel: "L58R B (TEST)",
+    paid: "Refunded",
+    store: null,
+    yourPaidMinor: "1413",
+    yourRefundedMinor: "1413",
+  });
+  expect(getClosedTableOwnReceiptCsrf()).toBe("C".repeat(43));
+  setEmptyTable(null);
+});
+
+// Batch 56 (v15 b55 live, L55 CB3 order 80): the phone that paid part 1 ($14.13) of a bill staff
+// then closed is told what it paid, and keeps the ended visit's read-only value for its receipt.
+it("batch 56: keeps what this phone paid on a bill staff closed, and its own receipt's access", async () => {
+  const restore = (value: unknown) =>
+    restoreCustomerSession(vi.fn().mockResolvedValue(response(value)));
+  const closed = {
+    tableLabel: "L55 CB3 (TEST)",
+    paid: "Some",
+    yourPayment: { amountMinor: "1413", method: "Online" },
+    csrfToken: "C".repeat(43),
+  };
+  expect(await restore({ schemaVersion: 1, closedTable: closed })).toBe(false);
+  expect(getCustomerCsrfCredential()).toBeNull();
+  expect(getEndedTable()).toEqual({
+    kind: "ClosedByStaff",
+    tableLabel: "L55 CB3 (TEST)",
+    paid: "Some",
+    store: null,
+    yourPaidMinor: "1413",
+  });
+  expect(getClosedTableOwnReceiptCsrf()).toBe("C".repeat(43));
+  // Never the whole table's receipt: that read stays closed to it.
+  expect(getSettledTableReceiptCsrf()).toBeNull();
+  setEmptyTable(null);
+  expect(getClosedTableOwnReceiptCsrf()).toBeNull();
+  for (const bad of [
+    { ...closed, paid: "Nothing" },
+    { ...closed, csrfToken: "short" },
+    { ...closed, yourPayment: { amountMinor: "0", method: "Online" } },
+    { ...closed, yourPayment: { amountMinor: "1413", method: "Cash" } },
+    { tableLabel: "L55 CB3 (TEST)", paid: "Some", yourPayment: closed.yourPayment },
+  ]) {
+    expect(await restore({ schemaVersion: 1, closedTable: bad })).toBe(false);
+    expect(getEndedTable()).toBeNull();
+  }
+});
+
+// Batch 57 (WP-2423 Q36): staff refunded part of it to the card; the restore says how much went
+// back (never more than it paid), so every tab tells the payer what they paid net.
+it("batch 57: keeps what went back to this phone's card from a bill staff closed", async () => {
+  const restore = (value: unknown) =>
+    restoreCustomerSession(vi.fn().mockResolvedValue(response(value)));
+  const closed = {
+    tableLabel: "L55 CB3 (TEST)",
+    paid: "Some",
+    yourPayment: { amountMinor: "1413", method: "Online", refundedMinor: "800" },
+    csrfToken: "C".repeat(43),
+  };
+  expect(await restore({ schemaVersion: 1, closedTable: closed })).toBe(false);
+  expect(getEndedTable()).toEqual({
+    kind: "ClosedByStaff",
+    tableLabel: "L55 CB3 (TEST)",
+    paid: "Some",
+    store: null,
+    yourPaidMinor: "1413",
+    yourRefundedMinor: "800",
+  });
+  expect(getClosedTableOwnReceiptCsrf()).toBe("C".repeat(43));
+  setEmptyTable(null);
+  for (const refundedMinor of ["1414", "0", "8.00", 800])
+    expect(
+      await restore({
+        schemaVersion: 1,
+        closedTable: { ...closed, yourPayment: { ...closed.yourPayment, refundedMinor } },
+      }),
+    ).toBe(false);
+  expect(getEndedTable()).toBeNull();
+});
+
+// Batch 60 (v15 b59 live): of what went back, what is still on its way, so the ended page says
+// "went back" only for what Payment confirmed (never more than went back, never without it).
+it("batch 60: keeps what of the refund is still on its way to this phone's card", async () => {
+  const restore = (value: unknown) =>
+    restoreCustomerSession(vi.fn().mockResolvedValue(response(value)));
+  const closed = {
+    tableLabel: "L55 CB3 (TEST)",
+    paid: "Some",
+    yourPayment: {
+      amountMinor: "1413",
+      method: "Online",
+      refundedMinor: "800",
+      refundPendingMinor: "300",
+    },
+    csrfToken: "C".repeat(43),
+  };
+  expect(await restore({ schemaVersion: 1, closedTable: closed })).toBe(false);
+  expect(getEndedTable()).toMatchObject({
+    kind: "ClosedByStaff",
+    yourPaidMinor: "1413",
+    yourRefundedMinor: "800",
+    yourRefundPendingMinor: "300",
+  });
+  setEmptyTable(null);
+  for (const yourPayment of [
+    { ...closed.yourPayment, refundPendingMinor: "801" },
+    { ...closed.yourPayment, refundPendingMinor: "0" },
+    { amountMinor: "1413", method: "Online", refundPendingMinor: "300" },
+  ])
+    expect(await restore({ schemaVersion: 1, closedTable: { ...closed, yourPayment } })).toBe(
+      false,
+    );
+  expect(getEndedTable()).toBeNull();
+});
+
+// Batch 47 (v15 b46 live): a tab left open while staff closed, moved or merged the table was
+// refused (401 cart_session_expired, or the cart read's "your place ended") and said "Your Store
+// session expired. Scan the location QR code again." The restore read is asked instead; only a
+// table's ended answer ends the visit on the page, anything else changes nothing.
+it("batch 47: an open visit takes only the table's ended answer from the restore read", async () => {
+  const store = {
+    brandDisplayName: "Test Merchant 2 - not production",
+    storeDisplayName: "Test Merchant 2 Main - not production",
+  };
+  const told: (string | null)[] = [];
+  const unsubscribe = subscribeCustomerCsrfContext(() => {
+    told.push(getCustomerCsrfCredential());
+  });
+  try {
+    for (const [answer, kind] of [
+      [{ schemaVersion: 1, emptyTable: { tableLabel: "E46 N (TEST)", store } }, "Empty"],
+      [
+        { schemaVersion: 1, closedTable: { tableLabel: "L54 GB2 (TEST)", paid: "Nothing", store } },
+        "ClosedByStaff",
+      ],
+      [
+        {
+          schemaVersion: 1,
+          settledTable: { tableLabel: "E46 P (TEST)", csrfToken: "C".repeat(43), store },
+        },
+        "Settled",
+      ],
+      [
+        { schemaVersion: 1, movedTable: { tableLabel: "E46 A (TEST)", merged: true, store } },
+        "Moved",
+      ],
+    ] as const) {
+      setCustomerCsrfCredential("A".repeat(43));
+      told.length = 0;
+      const fetcher = vi.fn().mockResolvedValue(response(answer));
+      expect(await settleEndedTableVisit(fetcher)).toBe(true);
+      expect(fetcher).toHaveBeenCalledWith(
+        "/api/v1/customer/session/csrf",
+        expect.objectContaining({ credentials: "same-origin", cache: "no-store" }),
+      );
+      expect(getCustomerCsrfCredential()).toBeNull();
+      expect(getEndedTable()?.kind).toBe(kind);
+      // Every page is told the visit ended here (App swaps the tab to the card).
+      expect(told).toEqual([null]);
+      setMovedTableLabel(null);
+      setSettledTable(null);
+      setEmptyTable(null);
+    }
+    // The visit goes on, or the answer is something else: nothing on the page changes.
+    for (const answer of [
+      {
+        schemaVersion: 1,
+        csrfToken: "B".repeat(43),
+        checkoutSessionReference: "0190fa21-0000-7000-8000-000000000001",
+      },
+      {
+        schemaVersion: 1,
+        endedVisit: {
+          csrfToken: "C".repeat(43),
+          order: {
+            orderReference: "0190fa21-0000-7000-8000-000000000002",
+            orderNumber: "7",
+            orderType: "DineIn",
+          },
+          receiptAvailableUntil: "2026-11-22T12:00:00.000Z",
+        },
+      },
+    ]) {
+      setCustomerCsrfCredential("A".repeat(43));
+      setCheckoutSessionReference("0190fa21-0000-7000-8000-000000000009");
+      told.length = 0;
+      expect(await settleEndedTableVisit(vi.fn().mockResolvedValue(response(answer)))).toBe(false);
+      expect(getCustomerCsrfCredential()).toBe("A".repeat(43));
+      expect(getCheckoutSessionReference()).toBe("0190fa21-0000-7000-8000-000000000009");
+      expect(getEndedVisitReceiptAccess("0190fa21-0000-7000-8000-000000000002", 0)).toBeNull();
+      expect(told).toEqual([]);
+    }
+    for (const failure of [
+      vi.fn().mockResolvedValue(new Response(null, { status: 204 })),
+      vi.fn().mockResolvedValue(new Response(null, { status: 503 })),
+      vi.fn().mockRejectedValue(new TypeError("offline")),
+    ]) {
+      setCustomerCsrfCredential("A".repeat(43));
+      expect(await settleEndedTableVisit(failure)).toBe(false);
+      expect(getCustomerCsrfCredential()).toBe("A".repeat(43));
+      // Not knowing is never "the visit ended" and never "the Store is busy" for an open visit.
+      expect(isCustomerSessionRestoreUnavailable()).toBe(false);
+    }
+  } finally {
+    unsubscribe();
+  }
+});
+
+it("batch 47: the table's ended answer still counts when the cart dropped the credential meanwhile", async () => {
+  setCustomerCsrfCredential("A".repeat(43));
+  let answer: (value: Response) => void = () => undefined;
+  const fetcher = vi.fn().mockReturnValue(
+    new Promise<Response>((resolve) => {
+      answer = resolve;
+    }),
+  );
+  const asked = settleEndedTableVisit(fetcher);
+  // The cart read was refused at the same moment (401): it dropped the credential and asks too.
+  setCustomerCsrfCredential(null);
+  const alsoAsked = settleEndedTableVisit(fetcher);
+  answer(response({ schemaVersion: 1, emptyTable: { tableLabel: "E46 N (TEST)" } }));
+  expect(await asked).toBe(true);
+  expect(await alsoAsked).toBe(true);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(getEndedTable()).toEqual({ kind: "Empty", tableLabel: "E46 N (TEST)", store: null });
+  // A new visit meanwhile (a join, a round placed) makes the answer out of date.
+  setEmptyTable(null);
+  setCustomerCsrfCredential("A".repeat(43));
+  const late = settleEndedTableVisit(
+    vi.fn().mockImplementation(async () => {
+      setCustomerCsrfCredential("E".repeat(43));
+      return response({ schemaVersion: 1, emptyTable: { tableLabel: "E46 N (TEST)" } });
+    }),
+  );
+  expect(await late).toBe(false);
+  expect(getCustomerCsrfCredential()).toBe("E".repeat(43));
+  expect(getEmptyTableLabel()).toBeNull();
+});
+
+// Batch 61 (v15 b60 live, CRT60 D order 51): by dish, staff closed the rest and then refunded
+// $8.00 of A's $14.13. The ended page on both phones said what was paid "stays paid" beside A's
+// "$8.00 went back to your card". The restore's someRefunded (only true, only with "Some").
+it("batch 61: keeps that part of what stays paid on a closed bill went back", async () => {
+  const restore = (value: unknown) =>
+    restoreCustomerSession(vi.fn().mockResolvedValue(response(value)));
+  await restore({
+    schemaVersion: 1,
+    closedTable: { tableLabel: "CRT60 D (TEST)", paid: "Some", someRefunded: true },
+  });
+  expect(getEndedTable()).toEqual({
+    kind: "ClosedByStaff",
+    tableLabel: "CRT60 D (TEST)",
+    paid: "Some",
+    someRefunded: true,
+    store: null,
+  });
+  setEmptyTable(null);
+  for (const bad of [
+    { tableLabel: "CRT60 D (TEST)", paid: "Some", someRefunded: false },
+    { tableLabel: "CRT60 D (TEST)", paid: "Refunded", someRefunded: true },
+    { tableLabel: "CRT60 D (TEST)", paid: "Nothing", someRefunded: true },
+  ]) {
+    expect(await restore({ schemaVersion: 1, closedTable: bad })).toBe(false);
+    expect(getEndedTable()).toBeNull();
+  }
+});

@@ -1,0 +1,164 @@
+import { createPostgresOrderCancelledAmountSource } from "./persistence/order-cancelled-amount-source.js";
+import { createHash } from "node:crypto";
+import { createPostgresSubmittedOrderAmountSource } from "./persistence/submitted-order-amount-source.js";
+import { loadOrderTaxRoundingMinor } from "./persistence/order-tax-rounding-store.js";
+import { createPostgresOrderAmendmentPosition } from "./persistence/dining-session-order-inventory.js";
+import { parseOrderingInstant, parseOrderingReference } from "../domain/cart.js";
+const unavailable = "ORDER_PRICED_AMOUNT_UNAVAILABLE",
+  refusal = "ORDER_PRICED_AMOUNT_PERMISSION_DENIED";
+/** Batch 43: the failure keeps what failed under it (a safe code for the one log line). */
+const fail = (cause?: unknown): never => {
+  throw new Error(unavailable, cause === undefined ? undefined : { cause });
+};
+/**
+ * Batch 43 (v15 b42 live 18:44:18Z): the reader's authorization no longer holds, for example a
+ * guest whose table staff closed while this read waited on the Order's fence. A refusal (the
+ * guest is no longer at the table), never "unavailable, try again".
+ */
+const refused = (): never => {
+  throw Object.assign(new Error(refusal), { code: refusal });
+};
+/** Current merchandise price basis. Refund and write-off decisions
+ * remain independent; this source never issues settlement or closure evidence.
+ * Caller must retain the transaction while consuming this position. */
+export function createPostgresOrderPricedAmountSource(
+  options: Parameters<typeof createPostgresSubmittedOrderAmountSource>[0] & {
+    /**
+     * v15 b11 (DEC-TAX-WHOLE-RECEIPT): "Excluded" prices the Order without its share of the bill's
+     * recorded tax rounding (`taxRoundingMinor` 0). Only for a reader of a bill nothing has been
+     * paid on, which adds the rounding as it computes it now: a version recorded before a comp or
+     * a dish taken off may no longer fit the bill, and must never make the bill unreadable.
+     * Absent: "Recorded", the figure a payment, a write-off and closing are checked against.
+     */
+    readonly taxRounding?: "Recorded" | "Excluded";
+  },
+) {
+  const brandReference = String(parseOrderingReference(options.brandReference)),
+    storeReference = String(parseOrderingReference(options.storeReference));
+  const submitted = createPostgresSubmittedOrderAmountSource({
+    ...options,
+    brandReference,
+    storeReference,
+  });
+  const cancellations = createPostgresOrderCancelledAmountSource(options);
+  const amendments = createPostgresOrderAmendmentPosition({
+    brandReference,
+    storeReference,
+    authorizeAndFence: (tx, query) =>
+      options.authorize(tx, { ...query, brandReference, storeReference }),
+  });
+  return async (...args: Parameters<typeof submitted>) => {
+    try {
+      const [tx, input] = args,
+        query = {
+          orderReference: String(parseOrderingReference(input.orderReference)),
+          observedAt: String(parseOrderingInstant(input.observedAt)),
+        };
+      // Match revision writers: disposition fence precedes parent/item locks and (WP-2423 lock
+      // order) the guest authorization's Dining row reads.
+      await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [
+        "OrderingOrderDisposition:" +
+          [brandReference, storeReference, query.orderReference].join(":"),
+      ]);
+      if ((await options.authorize(tx, { ...query, brandReference, storeReference })) !== true)
+        return refused();
+      const base = await submitted(tx, query),
+        changes = await amendments.load(tx, query);
+      for (const source of [base, changes])
+        if (
+          source.brandReference !== brandReference ||
+          source.storeReference !== storeReference ||
+          source.orderReference !== query.orderReference ||
+          source.observedAt !== query.observedAt
+        )
+          return fail();
+      if (
+        base.currencyCode !== "CAD" ||
+        base.tipIncluded !== false ||
+        base.amendmentAdjustmentsIncluded !== false ||
+        typeof base.totalMinor !== "bigint" ||
+        base.totalMinor < 0n ||
+        !/^sha256:[0-9a-f]{64}$/u.test(base.snapshotDigest)
+      )
+        return fail();
+      const applied = changes.amendments.filter((change) => change.status === "Applied");
+      const adjustment = applied.reduce((sum, change) => sum + BigInt(change.deltaMinor), 0n);
+      const pending = changes.amendments.filter(
+        (change) => change.status === "PendingApproval" || change.status === "PendingKitchen",
+      ).length;
+      if (adjustment !== changes.appliedDeltaMinor || pending !== changes.pendingCount)
+        return fail();
+      const cancelled = await cancellations(tx, base);
+      if (
+        typeof cancelled.cancelledTotalMinor !== "bigint" ||
+        cancelled.cancelledTotalMinor < 0n ||
+        typeof cancelled.billTaxShareMinor !== "bigint" ||
+        cancelled.billTaxShareMinor < 0n ||
+        // v15 b16 (DEC-COMP-BILL-CENT): beyond the dishes only by the whole bill's cents the
+        // reductions took, which this Order's share of the bill's tax rounding gives back.
+        cancelled.cancelledTotalMinor > base.totalMinor + cancelled.billTaxShareMinor ||
+        !/^sha256:[a-f0-9]{64}$/u.test(cancelled.snapshotDigest)
+      )
+        return fail();
+      // WP-2423 DEC-TAX-WHOLE-RECEIPT: this Order's share of its bill's recorded tax rounding.
+      const taxRounding =
+        options.taxRounding === "Excluded"
+          ? 0n
+          : await loadOrderTaxRoundingMinor(
+              tx as never,
+              { brandReference, storeReference },
+              query.orderReference,
+            );
+      const pricedTotalMinor =
+        base.totalMinor + adjustment - cancelled.cancelledTotalMinor + taxRounding;
+      // Without the rounding (a bill nothing is paid on adds the one it computes now), an Order
+      // comped in full can read those cents below nothing; with it, never.
+      if (
+        pricedTotalMinor <
+          (options.taxRounding === "Excluded" ? -cancelled.billTaxShareMinor : 0n) ||
+        pricedTotalMinor > 9223372036854775807n
+      )
+        return fail();
+      const evidence = Object.freeze(
+        changes.amendments.map((change) => Object.freeze({ ...change })),
+      );
+      const snapshotDigest =
+        "sha256:" +
+        createHash("sha256")
+          .update(
+            JSON.stringify([
+              brandReference,
+              storeReference,
+              query.orderReference,
+              base.snapshotDigest,
+              cancelled.snapshotDigest,
+              evidence,
+              adjustment.toString(),
+              taxRounding.toString(),
+              pricedTotalMinor.toString(),
+            ]),
+          )
+          .digest("hex");
+      if ((await options.authorize(tx, { ...query, brandReference, storeReference })) !== true)
+        return refused();
+      return Object.freeze({
+        brandReference,
+        storeReference,
+        ...query,
+        currencyCode: "CAD" as const,
+        submittedTotalMinor: base.totalMinor,
+        appliedAmendmentDeltaMinor: adjustment,
+        cancelledBatchTotalMinor: cancelled.cancelledTotalMinor,
+        taxRoundingMinor: taxRounding,
+        pricedTotalMinor,
+        pendingAmendmentCount: pending,
+        amendments: evidence,
+        snapshotDigest,
+      });
+    } catch (error) {
+      if (error instanceof Error && (error.message === refusal || error.message === unavailable))
+        throw error;
+      return fail(error);
+    }
+  };
+}

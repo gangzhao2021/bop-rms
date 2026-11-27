@@ -1,0 +1,2134 @@
+import {
+  setUnseatedTableScan,
+  setUnseatedTableWait,
+} from "../session/customer-transaction-context.js";
+import { renderToStaticMarkup } from "react-dom/server";
+import { MemoryRouter } from "react-router";
+import { describe, expect, it } from "vitest";
+import {
+  TableSummary,
+  DiningSessionPage,
+  DiningSessionScreen,
+  isDiningSessionActive,
+  keepsReadingTable,
+  type DiningSessionState,
+  roundTime,
+} from "./DiningSessionPage.js";
+import type { DiningRound, DiningSessionView } from "./dining-session-client.js";
+import { formatClockTime } from "../journey/format.js";
+import { CustomerPage } from "../journey/CustomerPage.js";
+import { zhHans } from "../i18n/zh-Hans.js";
+import { LanguageRoot } from "../i18n/i18n.js";
+import { parseSettledTableReceipt, SettledTableReceiptView } from "./SettledTableReceipt.js";
+
+const cad = (amountMinor: string) => ({ amountMinor, currencyCode: "CAD" });
+const at = "2026-10-13T18:00:00.000Z";
+function round(overrides: Partial<DiningRound> = {}): DiningRound {
+  return {
+    roundNumber: 1,
+    orderedBy: "You",
+    submittedAt: at,
+    status: "Preparing",
+    payment: "Paid",
+    cancelsAt: null,
+    storeCancellationReason: null,
+    items: [
+      {
+        displayName: "Ramen",
+        quantity: 2,
+        servedQuantity: 1,
+        cancelled: false,
+        lineTotal: cad("3000"),
+      },
+    ],
+    itemsTotal: cad("3000"),
+    ...overrides,
+  };
+}
+function view(overrides: Partial<DiningSessionView> = {}): DiningSessionView {
+  return {
+    tableLabel: "12",
+    orderNumber: "1042",
+    checkedAt: at,
+    paymentTiming: "PayFirst",
+    rounds: [
+      round(),
+      round({
+        roundNumber: 2,
+        orderedBy: "AnotherGuest",
+        status: "AwaitingPayment",
+        payment: "Awaiting",
+        items: [
+          {
+            displayName: "Gyoza",
+            quantity: 1,
+            servedQuantity: 0,
+            cancelled: false,
+            lineTotal: cad("900"),
+          },
+        ],
+        itemsTotal: cad("900"),
+      }),
+    ],
+    summary: { paid: cad("3450"), refunded: cad("0"), refundPending: cad("0"), due: cad("900") },
+    ...overrides,
+  };
+}
+const store = { storeName: "Synthetic Noodle Bar", serviceMode: "DineIn" as const };
+function render(state: DiningSessionState) {
+  return renderToStaticMarkup(
+    <MemoryRouter initialEntries={["/dine-in/session"]}>
+      <DiningSessionScreen state={state} store={store} onRefresh={() => undefined} />
+    </MemoryRouter>,
+  );
+}
+
+describe("CUST-DINE-IN-SESSION (WP-2423 Q8)", () => {
+  it("shows the table, each round with who ordered it, its status and payment, and the table total", () => {
+    const html = render({ status: "ready", view: view(), refreshing: false });
+    expect(html).toContain("Your table · 12");
+    // Batch 63 (F12): no "Order 1042" eyebrow over a dine-in table (the receipt keeps it).
+    expect(html).not.toContain("Order 1042");
+    expect(html).not.toContain("bop-eyebrow");
+    expect(html).toContain("Round 1 · Ordered by you");
+    expect(html).toContain("Round 2 · Ordered by another guest");
+    expect(html).toContain("Being prepared");
+    expect(html).toContain("Waiting for payment");
+    expect(html).toContain("Not paid yet");
+    expect(html).toContain("Served 1 of 2");
+    expect(html).toContain("2 × Ramen");
+    expect(html).toContain("$30.00");
+    expect(html).toContain("Paid so far");
+    expect(html).toContain("$34.50");
+    expect(html).toContain("$9.00");
+    expect(html).toContain("The kitchen starts this round once it is paid.");
+    expect(html).toContain('aria-current="page">Your table');
+    expect(html).toContain("Refresh now");
+    expect(html).toContain('href="/menu"');
+  });
+
+  it("explains cancelled, failed and refunded rounds in plain words", () => {
+    const html = render({
+      status: "ready",
+      refreshing: false,
+      view: view({
+        rounds: [
+          round({
+            status: "StoreCancelled",
+            payment: "Refunded",
+            storeCancellationReason: "SoldOut",
+          }),
+          round({
+            roundNumber: 2,
+            status: "PaymentFailed",
+            payment: "Failed",
+            cancelsAt: "2026-10-13T18:40:00.000Z",
+          }),
+          round({ roundNumber: 3, status: "NotPaidCancelled", payment: "NotCharged" }),
+          round({ roundNumber: 4, status: "Served", payment: "Paid" }),
+        ],
+        summary: {
+          paid: cad("3450"),
+          refunded: cad("3450"),
+          refundPending: cad("452"),
+          due: cad("0"),
+        },
+      }),
+    });
+    expect(html).toContain("Cancelled by the store");
+    expect(html).toContain("An item you ordered sold out.");
+    expect(html).toContain("The payment was refunded.");
+    expect(html).toContain("On hold until paid");
+    expect(html).toContain("Payment failed");
+    expect(html).toContain(
+      `This round will be cancelled at ${formatClockTime("2026-10-13T18:40:00.000Z")}`,
+    );
+    expect(html).toContain("No one was charged for it.");
+    expect(html).toContain("Refund on its way");
+    expect(html).toContain("$4.52");
+    expect(html).toContain("Nothing");
+    expect(html).toContain("Served");
+  });
+
+  // b26 (v15 live25): on a table that paid, a round refused whole with no refund says no refund
+  // was made (never "being refunded"), and a comped $0.00 round in the kitchen has nothing to pay.
+  it("never claims a refund that does not exist, and a comped round has nothing to pay", () => {
+    const html = render({
+      status: "ready",
+      refreshing: false,
+      view: view({
+        paymentTiming: "PayLater",
+        rounds: [
+          round({ status: "StoreCancelled", payment: "Paid" }),
+          round({ roundNumber: 2, status: "Served", payment: "NotCharged" }),
+          round({ roundNumber: 3, status: "WaitingForStaff", payment: "NotCharged" }),
+        ],
+      }),
+    });
+    expect(html).toContain("This round was paid and has not been refunded. Ask a staff member.");
+    expect(html).not.toContain("being refunded");
+    expect(html).not.toContain("Refund on its way");
+    expect(html).toContain("Nothing to pay");
+    // A round still waiting for staff is not charged yet (not "nothing to pay").
+    expect(html.split("Nothing to pay").length - 1).toBe(1);
+    expect(html).toContain("Not charged");
+  });
+
+  // v15 b19: two Chinese sentences built from parts meet at their 句号 with no space between.
+  it("writes a refused round's reason and refund, and a held round's two notes, without a gap in Chinese", () => {
+    const state: DiningSessionState = {
+      status: "ready",
+      refreshing: false,
+      view: view({
+        rounds: [
+          round({
+            status: "StoreCancelled",
+            payment: "Refunded",
+            storeCancellationReason: "CustomerRequest",
+          }),
+          round({
+            roundNumber: 2,
+            status: "WaitingForStaff",
+            payment: "NotCharged",
+            waitingReason: "FirstOrder",
+          }),
+        ],
+      }),
+    };
+    const zh = renderToStaticMarkup(
+      <LanguageRoot initial="zh-Hans">{() => render(state)}</LanguageRoot>,
+    );
+    renderToStaticMarkup(<LanguageRoot initial="en">{() => null}</LanguageRoot>);
+    expect(zh).toContain("门店已按您的要求取消。款项已退回。");
+    expect(zh).not.toMatch(/。 /u);
+    const en = render(state);
+    expect(en).toContain("The store cancelled it at your request. The payment was refunded.");
+    expect(en).toMatch(/before the kitchen\. It is not charged/u);
+  });
+
+  // WP-2423 abandoned payment: the guest who sent a round and left the payment page pays it here.
+  it("offers the guest who ordered an unpaid round to pay for it, never another guest's", () => {
+    const html = render({
+      status: "ready",
+      refreshing: false,
+      view: view({
+        rounds: [
+          round({
+            roundNumber: 1,
+            orderedBy: "You",
+            status: "AwaitingPayment",
+            payment: "Awaiting",
+          }),
+          round({
+            roundNumber: 2,
+            orderedBy: "AnotherGuest",
+            status: "AwaitingPayment",
+            payment: "Awaiting",
+          }),
+        ],
+      }),
+    });
+    expect(html).toContain('href="/checkout/payment"');
+    expect(html).toContain("Pay for round 1");
+    expect(html).not.toContain("Pay for round 2");
+  });
+
+  // WP-2423 Q7 slice 2 (DEC-STAFF-DINE-IN-ROUND): a round staff entered for the table.
+  it("shows a round staff entered for the table and how it is paid", () => {
+    const html = render({
+      status: "ready",
+      refreshing: false,
+      view: view({
+        rounds: [
+          round(),
+          round({
+            roundNumber: 2,
+            orderedBy: "Staff",
+            status: "AwaitingPayment",
+            payment: "Awaiting",
+          }),
+          round({ roundNumber: 3, orderedBy: "Staff", status: "Queued", payment: "Paid" }),
+        ],
+      }),
+    });
+    expect(html).toContain("Round 2 · Entered by staff");
+    expect(html).toContain("Round 3 · Entered by staff");
+    expect(html).toContain(
+      "Staff entered this round for your table. Pay them on the card machine and the kitchen starts it.",
+    );
+    expect(html).not.toMatch(/\bStaff\b(?! entered)|card_machine|StoreCardMachine/u);
+  });
+
+  describe("WP-2423 item 8b: a charge reads as a charge", () => {
+    const again = {
+      sellableReference: "018f7710-0000-7000-8000-000000000001",
+      optionSelections: [],
+    };
+    const chargeItem = (displayName: string) => ({
+      displayName,
+      quantity: 4,
+      servedQuantity: 0,
+      cancelled: false,
+      lineTotal: cad("800"),
+    });
+    const html = (value: DiningSessionView) =>
+      render({ status: "ready", view: value, refreshing: false });
+    const onlyRound = (overrides: Partial<DiningRound>) =>
+      html(
+        view({
+          paymentTiming: "PayLater",
+          rounds: [
+            round({
+              orderedBy: "Staff",
+              charge: true,
+              status: "Queued",
+              payment: "OnTableBill",
+              items: [chargeItem("Corkage")],
+              itemsTotal: cad("800"),
+              ...overrides,
+            }),
+          ],
+        }),
+      );
+
+    it("a charge round reads as a charge", () => {
+      const page = onlyRound({ payment: "Paid" });
+      expect(page).toContain("Round 1 · Other charge");
+      expect(page).toContain("Added at");
+      expect(page).not.toContain("Ordered at");
+      expect(page).not.toContain("Entered by staff");
+      // Nothing about a kitchen, and no "served 0 of 4" for a fee.
+      expect(page).not.toContain("<dt>Status</dt>");
+      expect(page).not.toContain("Served");
+      expect(page).not.toContain("Order again");
+      // Money still adds up.
+      expect(page).toContain("Corkage");
+      expect(page).toContain("Round total");
+      expect(page).toContain("<dt>Payment</dt>");
+    });
+
+    it("a per-person charge says what it is on its own card, once", () => {
+      const page = html(
+        view({
+          paymentTiming: "PayLater",
+          rounds: [
+            round({
+              orderedBy: "Staff",
+              charge: true,
+              tea: true,
+              status: "Queued",
+              payment: "OnTableBill",
+              items: [chargeItem("Sauce bar")],
+              itemsTotal: cad("800"),
+            }),
+          ],
+          summary: {
+            paid: cad("0"),
+            refunded: cad("0"),
+            refundPending: cad("0"),
+            due: cad("800"),
+            teaCharge: { perGuest: cad("200"), guests: 4, name: "Sauce bar" },
+          },
+        }),
+      );
+      expect(page).toContain("Round 1 · Per-person charge");
+      const sentence = "Sauce bar $2.00 per person · 4 at this table (added by staff).";
+      expect(page.split(sentence)).toHaveLength(2);
+      const card = page.slice(page.indexOf("<article"), page.indexOf("</article>"));
+      expect(card).toContain(sentence);
+    });
+
+    it("the per-person sentence stays with the total when no card is only that charge", () => {
+      const page = html(
+        view({
+          paymentTiming: "PayLater",
+          rounds: [round({ orderedBy: "Staff", payment: "OnTableBill", status: "Queued" })],
+          summary: {
+            paid: cad("0"),
+            refunded: cad("0"),
+            refundPending: cad("0"),
+            due: cad("800"),
+            teaCharge: { perGuest: cad("200"), guests: 4, name: "Sauce bar" },
+          },
+        }),
+      );
+      expect(page.slice(page.indexOf("Table total"))).toContain("Sauce bar $2.00 per person");
+    });
+
+    it("a charge a guest ordered from the menu is not called added by staff", () => {
+      const page = onlyRound({ orderedBy: "You" });
+      expect(page).toContain("Round 1 · Ordered by you");
+      expect(page).toContain("Ordered at");
+      expect(page).toContain("<dt>Status</dt>");
+      expect(page).not.toContain("Other charge");
+      expect(page).not.toContain("Added at");
+    });
+
+    it("a dish beside a charge keeps its button", () => {
+      const page = html(
+        view({
+          rounds: [
+            round({
+              items: [{ ...chargeItem("Corkage") }, { ...chargeItem("Ramen"), orderAgain: again }],
+            }),
+          ],
+        }),
+      );
+      expect(page.split("Order again")).toHaveLength(2);
+      expect(page).toContain("Order one more Ramen");
+    });
+
+    it("a charge staff took off folds into one line with charges’ words", () => {
+      const page = html(
+        view({
+          paymentTiming: "PayLater",
+          rounds: [
+            round({
+              orderedBy: "Staff",
+              charge: true,
+              status: "StoreCancelled",
+              payment: "NotCharged",
+            }),
+            round({
+              roundNumber: 2,
+              orderedBy: "Staff",
+              charge: true,
+              status: "StoreCancelled",
+              payment: "NotCharged",
+            }),
+          ],
+        }),
+      );
+      expect(page).toContain("Staff took off 2 charges. They aren’t charged.");
+      expect(page).not.toContain("<article");
+      // One charge reads as one, in both languages' dictionaries.
+      const one = html(
+        view({
+          paymentTiming: "PayLater",
+          rounds: [
+            round({
+              orderedBy: "Staff",
+              charge: true,
+              status: "StoreCancelled",
+              payment: "NotCharged",
+            }),
+          ],
+        }),
+      );
+      expect(one).toContain("Staff took off 1 charge. It isn’t charged.");
+      expect(one).not.toContain("1 charges");
+      expect(zhHans["Staff took off 1 charge. It isn’t charged."]).toBe(
+        "店员撤下了 1 项收费，不收费。",
+      );
+    });
+
+    it("a staff charge waiting for payment names the card machine, never the kitchen", () => {
+      const page = onlyRound({
+        status: "AwaitingPayment",
+        payment: "Awaiting",
+        cancelsAt: "2026-10-13T19:00:00.000Z",
+      });
+      const card = page.slice(page.indexOf("<article"), page.indexOf("</article>"));
+      expect(card).toContain("Pay a staff member on the card machine.");
+      expect(card).not.toContain("kitchen");
+      expect(card).toContain("it is cancelled and nobody is charged");
+    });
+  });
+
+  describe("WP-2423 item 6: the page a guest lands on after placing a round", () => {
+    const ready = { status: "ready", view: view(), refreshing: false } as const;
+    const placing = (placed: "Sent" | "Held" | null) =>
+      renderToStaticMarkup(
+        <MemoryRouter initialEntries={["/dine-in/session"]}>
+          <DiningSessionScreen
+            state={ready}
+            store={store}
+            onRefresh={() => undefined}
+            placed={placed}
+          />
+        </MemoryRouter>,
+      );
+
+    // Batch 63 (F12): by the round's number, and "sent to the kitchen" only once the round's own
+    // status says the kitchen has it (here "Being prepared").
+    it("says which round was placed, and the kitchen only once the round is there", () => {
+      const sent = placing("Sent");
+      expect(sent).toContain(
+        '<p class="dining-session__placed" role="status">Round 1 sent to the kitchen</p>',
+      );
+      const held = placing("Held");
+      expect(held).toContain("Round 1 placed. Staff confirm it first.");
+      expect(placing(null)).not.toContain("Order placed");
+    });
+
+    it("lists the newest round first, with numbers unchanged", () => {
+      const html = placing(null);
+      expect(html.indexOf("Round 2 ·")).toBeGreaterThan(-1);
+      expect(html.indexOf("Round 2 ·")).toBeLessThan(html.indexOf("Round 1 ·"));
+    });
+  });
+
+  it("WP-2423 Q26: says which dish the kitchen is making again and that it will come to the table", () => {
+    const ramen = round().items[0];
+    if (ramen === undefined) throw new Error("fixture");
+    const html = render({
+      status: "ready",
+      refreshing: false,
+      view: view({
+        rounds: [
+          round({
+            status: "Serving",
+            items: [
+              { ...ramen, quantity: 1, servedQuantity: 0, beingRemade: true },
+              { ...ramen, displayName: "Gyoza", quantity: 1, servedQuantity: 1 },
+            ],
+          }),
+        ],
+      }),
+    });
+    expect(html).toContain("Being remade · we&#x27;ll bring it to your table shortly");
+    // The dish being remade does not also claim it was served; the other dish still does.
+    expect(html.match(/Being remade/gu)).toHaveLength(1);
+    expect(html).toContain("Served 1 of 1");
+    expect(html).not.toContain("Served 0 of 1");
+    expect(html.replace(/<[^>]*>/gu, " ")).not.toMatch(/beingRemade|rework|remake/u);
+  });
+
+  it("never shows names, contact details, internal codes or references", () => {
+    const html = render({ status: "ready", view: view(), refreshing: false });
+    expect(html).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}/u);
+    expect(html).not.toMatch(
+      /AnotherGuest|AwaitingPayment|PaymentFailed|NotPaidCancelled|StoreCancelled|RefundPending|SoldOut|@|phone|email/iu,
+    );
+  });
+
+  it("tells a guest who has not joined how to join, and offers retry when the table can't load", () => {
+    // M115: the table's page offers the join itself (QR, or a code when paused): no code asked here.
+    const notJoined = render({ status: "not-joined" });
+    expect(notJoined).toContain("Join your table first");
+    expect(notJoined).toContain("Join this table to order and see what your table has ordered.");
+    expect(notJoined).not.toContain("join code");
+    expect(notJoined).toContain(">Join this table</a>");
+    expect(notJoined).not.toContain("Round");
+    // Batch 42 (v15 b41 live): a table staff haven't opened yet says what the waiting page says,
+    // and offers the way back to it; nobody hands out a join code there.
+    setUnseatedTableScan(true);
+    setUnseatedTableWait({
+      kind: "NotOpen",
+      storeDisplayName: "Test Merchant 2 Main - not production",
+      tableLabel: "L41V A (TEST)",
+      check: null,
+    });
+    try {
+      const waiting = render({ status: "not-joined" });
+      expect(waiting).toContain(
+        "L41V A (TEST) at Test Merchant 2 Main - not production isn’t open yet",
+      );
+      expect(waiting).toContain(
+        "Ask staff to seat you. This page goes on by itself a few seconds after staff open the table.",
+      );
+      expect(waiting).toContain(">Back to the waiting page</a>");
+      expect(waiting).not.toContain("join code");
+      expect(waiting).not.toContain("Join your table first");
+      setUnseatedTableWait({
+        kind: "BeingCleaned",
+        storeDisplayName: "Synthetic Noodle Bar",
+        tableLabel: null,
+        check: null,
+      });
+      const cleaning = render({ status: "not-joined" });
+      expect(cleaning).toContain("This table is being cleaned. Pick another table or ask staff.");
+      expect(cleaning).not.toContain("join code");
+    } finally {
+      setUnseatedTableWait(null);
+      setUnseatedTableScan(false);
+    }
+    // A phone with no table at all (opened here without a scan) is told how a guest joins one.
+    const noTable = renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/dine-in/session"]}>
+        <DiningSessionScreen state={{ status: "not-joined" }} onRefresh={() => undefined} />
+      </MemoryRouter>,
+    );
+    expect(noTable).toContain("Ask a staff member, or the person who joined your table first");
+    expect(noTable).toContain(">Go to the start</a>");
+    const failed = render({ status: "unavailable", view: null, offline: false });
+    expect(failed).toContain("We couldn’t load your table");
+    expect(failed).toContain("Try again");
+    const stale = render({ status: "unavailable", view: view(), offline: true });
+    expect(stale).toContain("You’re offline");
+    expect(stale).toContain("Showing what was loaded before.");
+    expect(stale).toContain("Round 1 · Ordered by you");
+  });
+
+  it("doesn't ask for payment on a bill staff closed when the guests left", () => {
+    const html = render({
+      status: "ready",
+      refreshing: false,
+      view: view({
+        summary: {
+          paid: cad("0"),
+          refunded: cad("0"),
+          refundPending: cad("0"),
+          due: cad("0"),
+          closedByStaff: true,
+        },
+      }),
+    });
+    expect(html).toContain("Staff closed your table’s bill; nothing was charged.");
+    expect(html).not.toContain("To pay at the end");
+    expect(html).not.toContain("<dt>Waiting for payment</dt>");
+  });
+
+  // v15 b12 live: a table comped to nothing read "SBC 1 (TEST) has paid and closed" though nothing
+  // was paid; its receipt says what was paid (or that nothing was).
+  it("b13: a closed table is said closed, never paid, and a $0 receipt says nothing was to pay", () => {
+    expect(render({ status: "settled", tableLabel: "SBC 1 (TEST)" })).not.toContain("paid");
+    const free = renderToStaticMarkup(
+      <SettledTableReceiptView
+        receipt={parseSettledTableReceipt({
+          schemaVersion: 1,
+          receipt: {
+            tableLabel: "SBC 1 (TEST)",
+            rounds: [
+              {
+                roundNumber: 1,
+                fromTableLabel: null,
+                items: [{ displayName: "Beef noodles", subtotalMinor: "0", reduced: "Comp" }],
+              },
+            ],
+            subtotalMinor: "0",
+            taxMinor: "0",
+            ordersTotalMinor: "0",
+            tipMinor: "0",
+            roundingMinor: "0",
+            paidMinor: "0",
+            split: false,
+            payments: [],
+          },
+        })}
+      />,
+    );
+    expect(free).toContain("<dt>Nothing to pay</dt><dd>The restaurant took everything off.</dd>");
+    expect(free).not.toContain("Paid by");
+  });
+
+  // Batch 45 (v15 b44 live, v-d-V1-390-ended-reload.png): a table closed with nothing ordered
+  // asked the guest for a join code. It says the visit ended and nothing was charged.
+  it("batch 45: a table closed with nothing ordered says its visit ended, never asks for a code", () => {
+    const html = render({ status: "ended-empty", tableLabel: "V44 A (TEST)" });
+    expect(html).toContain("This table’s visit has ended");
+    // A label that already names the table is said as it is (saidTable).
+    expect(html).toContain("Nothing was ordered at V44 A (TEST), so nothing was charged.");
+    expect(html).toContain("New party? Ask staff to seat you, then scan again.");
+    expect(html).not.toMatch(/join code|Join your table first|Join this table/iu);
+    expect(html).not.toContain("Loading receipt");
+    expect(html).not.toContain("Order more from the menu");
+    expect(html).not.toContain("Everything ordered at this table");
+    expect(keepsReadingTable({ status: "ended-empty", tableLabel: "T1" })).toBe(false);
+  });
+
+  // Batch 55 review (v15 b54, order 59): after staff closed the bill the guests left and then the
+  // table, the restore gave receipt access: "Thank you for dining with us", then no receipt (the
+  // read refuses a written-off bill). Your table says how the bill ended, with no receipt.
+  it("batch 55 review: a table whose bill staff closed says so after it closes, with no receipt", () => {
+    const nothing = render({
+      status: "ended-closed",
+      tableLabel: "L54 GB2 (TEST)",
+      paid: "Nothing",
+    });
+    expect(nothing).toContain("This table’s visit has ended");
+    expect(nothing).toContain("Your meal at L54 GB2 (TEST) has ended.");
+    expect(nothing).toContain("Staff closed your table’s bill; nothing was charged.");
+    expect(nothing).toContain("New party? Ask staff to seat you, then scan again.");
+    for (const html of [
+      nothing,
+      render({ status: "ended-closed", tableLabel: "L54 GB2 (TEST)", paid: "Some" }),
+    ]) {
+      expect(html).not.toMatch(/receipt|Thank you for dining|is paid|Loading/iu);
+      expect(html).not.toContain("Order more from the menu");
+      expect(html).not.toContain("Everything ordered at this table");
+    }
+    expect(
+      render({ status: "ended-closed", tableLabel: "L54 GB2 (TEST)", paid: "Some" }),
+    ).toContain(
+      "Staff closed your table’s bill: what was paid stays paid, and the rest is not charged to you.",
+    );
+    const zh = renderToStaticMarkup(
+      <LanguageRoot initial="zh-Hans">
+        {() => (
+          <MemoryRouter initialEntries={["/dine-in/session"]}>
+            <DiningSessionScreen
+              state={{ status: "ended-closed", tableLabel: "L54 GB2 (TEST)", paid: "Some" }}
+              store={store}
+              onRefresh={() => undefined}
+            />
+          </MemoryRouter>
+        )}
+      </LanguageRoot>,
+    );
+    renderToStaticMarkup(<LanguageRoot initial="en">{() => null}</LanguageRoot>);
+    expect(zh).toContain("店员已关闭本桌账单：已付的款项不变，其余不向您收取。");
+    expect(zh).not.toMatch(/收据|已结清|谢谢光临/u);
+    expect(keepsReadingTable({ status: "ended-closed", tableLabel: "T1", paid: "Nothing" })).toBe(
+      false,
+    );
+  });
+
+  it("thanks a guest whose table was settled and loads the table's receipt", () => {
+    const plain = render({ status: "settled", tableLabel: "DEMO-02" });
+    expect(plain).toContain("Thank you for dining with us.");
+    expect(plain).toContain("Your meal at table DEMO-02 has ended.");
+    expect(plain).toContain("New party? Ask staff to seat you, then scan again.");
+    expect(plain).toContain("Loading receipt");
+    expect(plain).not.toContain("/orders/");
+    expect(plain).not.toContain("Join your table first");
+    expect(plain).not.toMatch(/staff member|Need a staff/iu);
+    expect(plain).not.toContain("Order more from the menu");
+    expect(plain).not.toContain("Everything ordered at this table");
+  });
+
+  it("shows a settled table's receipt: dishes, tax, tip, cash rounding and how it was paid", () => {
+    const receipt = (payments: unknown[], extra: Record<string, unknown> = {}) =>
+      renderToStaticMarkup(
+        <SettledTableReceiptView
+          receipt={parseSettledTableReceipt({
+            schemaVersion: 1,
+            receipt: {
+              tableLabel: "DEMO-03",
+              rounds: [
+                {
+                  roundNumber: 1,
+                  fromTableLabel: null,
+                  items: [
+                    { displayName: "Milk tea", subtotalMinor: "450", reduced: null },
+                    { displayName: "Tea", subtotalMinor: "0", reduced: "Comp" },
+                  ],
+                },
+                {
+                  roundNumber: 2,
+                  fromTableLabel: "T-M",
+                  items: [{ displayName: "Ramen", subtotalMinor: "1200", reduced: "Discount" }],
+                },
+              ],
+              subtotalMinor: "1650",
+              taxMinor: "215",
+              ordersTotalMinor: "1865",
+              tipMinor: "0",
+              roundingMinor: "0",
+              paidMinor: "1865",
+              split: false,
+              payments,
+              ...extra,
+            },
+          })}
+        />,
+      );
+    // WP-2423 取舍 18: what points took off, marked as already out of the subtotal and tax.
+    const withPoints = receipt(
+      [
+        {
+          partNumber: null,
+          method: "Cash",
+          tipMinor: "0",
+          roundingMinor: "0",
+          totalMinor: "111",
+          paidAt: "2026-10-30T23:00:00.000Z",
+        },
+      ],
+      { pointsUsedMinor: "339" },
+    );
+    expect(withPoints).toContain("Points used (already taken off)");
+    expect(withPoints).toContain("−$3.39");
+
+    const cash = receipt([{ partNumber: null, method: "Cash", totalMinor: "1865" }], {
+      roundingMinor: "1",
+      paidMinor: "1866",
+      tipMinor: "0",
+    });
+    for (const text of [
+      "Receipt",
+      "Round 1",
+      "Milk tea",
+      "Tea · On the house",
+      "Round 2 · From T-M",
+      "Ramen · Discounted",
+      "Subtotal before tax",
+      "$16.50",
+      "Tax",
+      "$2.15",
+      "Cash rounding",
+      "$0.01",
+      "Total paid",
+      "$18.66",
+      "Paid by",
+      "Cash",
+    ])
+      expect(cash).toContain(text);
+    expect(cash).not.toContain("Tip");
+    expect(cash).not.toContain("Rounding (tax worked out on the whole bill)");
+    // WP-2423 DEC-TAX-WHOLE-RECEIPT (v15 batch 9): a receipt has one tax figure, the bill's tax
+    // worked out once over the whole bill ($2.15 charged by the rounds, 1¢ less on the bill), as
+    // the staff's paid bill prints it; no separate rounding line.
+    const rounded = receipt([{ partNumber: null, method: "Cash", totalMinor: "1864" }], {
+      taxRoundingMinor: "-1",
+      ordersTotalMinor: "1864",
+      paidMinor: "1865",
+    });
+    expect(rounded).toContain("$2.14");
+    expect(rounded).not.toContain("$2.15");
+    expect(rounded).not.toContain("Rounding (tax worked out on the whole bill)");
+    const split = receipt(
+      [
+        { partNumber: 1, method: "Online", totalMinor: "1100" },
+        { partNumber: 2, method: "CardMachine", totalMinor: "1000" },
+      ],
+      { split: true, tipMinor: "235", paidMinor: "2100" },
+    );
+    expect(split).toContain("Part 1 paid by");
+    expect(split).toContain("Online by phone · $11.00");
+    expect(split).toContain("Part 2 paid by");
+    expect(split).toContain("Card at the table · $10.00");
+    expect(split).toContain("Tip");
+    expect(split).toContain("$2.35");
+    // Public fields only.
+    expect(cash + split).not.toMatch(
+      /[0-9a-f]{8}-[0-9a-f]{4}-7|CardMachine|Online\b(?! by phone)|@/u,
+    );
+    expect(() => parseSettledTableReceipt({ receipt: { tableLabel: "<b>" } })).toThrow();
+  });
+
+  it("Owner 2026-11-03: keeps reading a served table until it is settled, so paying shows", () => {
+    const served = {
+      ...view(),
+      rounds: view().rounds.map((round) => ({ ...round, status: "Served" as const })),
+    };
+    expect(isDiningSessionActive(served)).toBe(false);
+    expect(keepsReadingTable({ status: "ready", view: served, refreshing: false })).toBe(true);
+    expect(keepsReadingTable({ status: "settled", tableLabel: "T1" })).toBe(false);
+  });
+  it("Owner 2026-11-03: a table that paid offers no more ordering", () => {
+    const summary = view().summary;
+    if (!summary) throw new Error("the sample view has a summary");
+    const paid = view({
+      paymentTiming: "PayLater",
+      rounds: [round({ status: "Served" })],
+      summary: {
+        ...summary,
+        due: { amountMinor: "0", currencyCode: "CAD" },
+        paid: { amountMinor: "3041", currencyCode: "CAD" },
+      },
+    });
+    const html = render({ status: "ready", view: paid, refreshing: false });
+    expect(html).not.toContain("Order more from the menu");
+    expect(html).not.toContain("Order again");
+  });
+  it("Owner 2026-11-03: what the guest ordered comes before the table total", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <DiningSessionScreen
+          state={{ status: "ready", view: view(), refreshing: false }}
+          onRefresh={() => undefined}
+        />
+      </MemoryRouter>,
+    );
+    expect(html.indexOf("dining-rounds-heading")).toBeLessThan(
+      html.indexOf("dining-summary-heading"),
+    );
+  });
+  it("shows an empty table plainly and only keeps polling while something is in progress", () => {
+    const empty = view({ rounds: [], summary: null, orderNumber: null });
+    const html = render({ status: "ready", view: empty, refreshing: false });
+    expect(html).toContain("No one at this table has ordered yet");
+    expect(html).not.toContain("Table total");
+    expect(isDiningSessionActive(empty)).toBe(true);
+    expect(isDiningSessionActive(view())).toBe(true);
+    expect(
+      isDiningSessionActive(
+        view({ rounds: [round({ status: "Served" }), round({ status: "NotPaidCancelled" })] }),
+      ),
+    ).toBe(false);
+  });
+
+  it("starts in a loading state before the table is read", () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/dine-in/session"]}>
+        <DiningSessionPage store={store} client={{ load: async () => view() }} />
+      </MemoryRouter>,
+    );
+    expect(html).toContain("Loading your table");
+    expect(html).not.toContain("unavailable");
+  });
+
+  it("is linked from the journey header for dine-in guests only", () => {
+    const page = (serviceMode: "DineIn" | "Pickup") =>
+      renderToStaticMarkup(
+        <MemoryRouter>
+          <CustomerPage step="menu" store={{ storeName: "Synthetic", serviceMode }}>
+            <p>Menu</p>
+          </CustomerPage>
+        </MemoryRouter>,
+      );
+    expect(page("DineIn")).toContain('href="/dine-in/session"');
+    expect(page("DineIn")).toContain(">Your table</a>");
+    expect(page("Pickup")).not.toContain("/dine-in/session");
+  });
+});
+
+describe("CUST-DINE-IN-SESSION item prices before tax (WP-2423 D5)", () => {
+  // Ramen 2 × $13.27 + 13% tax = $30.00; Gyoza $7.96 + $1.04 = $9.00.
+  const priced = view({
+    rounds: [
+      round({
+        items: round().items.map((entry) => ({ ...entry, priceBeforeTax: cad("2655") })),
+        subtotal: cad("2655"),
+        tax: cad("345"),
+      }),
+      round({
+        roundNumber: 2,
+        orderedBy: "AnotherGuest",
+        status: "AwaitingPayment",
+        payment: "Awaiting",
+        items: [
+          {
+            displayName: "Gyoza",
+            quantity: 1,
+            servedQuantity: 0,
+            cancelled: false,
+            lineTotal: cad("900"),
+            priceBeforeTax: cad("796"),
+          },
+        ],
+        subtotal: cad("796"),
+        tax: cad("104"),
+        itemsTotal: cad("900"),
+      }),
+    ],
+    summary: {
+      paid: cad("3000"),
+      refunded: cad("0"),
+      refundPending: cad("0"),
+      due: cad("900"),
+      ordered: { subtotal: cad("3451"), tax: cad("449"), total: cad("3900") },
+    },
+  });
+  const text = (html: string) => html.replace(/<[^>]+>/gu, " ").replace(/\s+/gu, " ");
+
+  it("WP-2423 取舍 18: says what points took off, so what was paid adds up", () => {
+    const summary = {
+      ...priced.summary,
+      pointsUsed: cad("339"),
+      paid: cad("3561"),
+      due: cad("0"),
+    } as typeof priced.summary;
+    const html = text(render({ status: "ready", view: { ...priced, summary }, refreshing: false }));
+    expect(html).toContain("Total ordered $39.00 Points used −$3.39");
+    expect(html).toContain("Paid so far $35.61");
+    expect(text(render({ status: "ready", view: priced, refreshing: false }))).not.toContain(
+      "Points used",
+    );
+  });
+
+  it("v15 2026-11-02: every line between what was ordered and what is to pay", () => {
+    const summary = {
+      ...priced.summary,
+      pointsUsed: cad("339"),
+      takenOff: cad("150"),
+      taxRounding: cad("1"),
+      paid: cad("0"),
+      due: cad("3412"),
+    } as typeof priced.summary;
+    const html = text(render({ status: "ready", view: { ...priced, summary }, refreshing: false }));
+    expect(html).toContain(
+      "Total ordered $39.00 Points used −$3.39 Taken off by the restaurant −$1.50 Rounding (tax worked out on the whole bill) $0.01",
+    );
+  });
+
+  // v15 b12 live (BR E-style bill): the guest read Tax $6.51, "Taken off −$31.09" and "Rounding
+  // $0.01" while staff checkout and the paid bill read Subtotal $22.50 / Tax $2.93 / $25.43; at a
+  // table comped to $0 each round card still read its full "Round total $14.13".
+  it("b13: a table paying at the end reads its bill and each round as checkout prints them", () => {
+    const lines = (
+      items: string,
+      takenOff: string,
+      subtotal: string,
+      tax: string,
+      total: string,
+    ) => ({
+      items: cad(items),
+      takenOff: cad(takenOff),
+      pointsUsed: cad("0"),
+      subtotal: cad(subtotal),
+      tax: cad(tax),
+      total: cad(total),
+    });
+    const [first, second] = priced.rounds;
+    if (first === undefined || second === undefined || priced.summary === null)
+      throw new Error("fixture");
+    const billed = {
+      ...priced,
+      paymentTiming: "PayLater" as const,
+      rounds: [
+        {
+          ...first,
+          payment: "OnTableBill" as const,
+          bill: lines("2655", "655", "2000", "260", "2260"),
+        },
+        {
+          ...second,
+          payment: "OnTableBill" as const,
+          bill: lines("796", "0", "796", "103", "899"),
+        },
+      ],
+      summary: {
+        ...priced.summary,
+        paid: cad("0"),
+        due: cad("3159"),
+        takenOff: cad("740"),
+        taxRounding: cad("1"),
+        bill: lines("3451", "655", "2796", "363", "3159"),
+      },
+    };
+    const html = text(render({ status: "ready", view: billed, refreshing: false }));
+    expect(html).toContain(
+      "Dishes $34.51 Taken off by the restaurant −$6.55 Subtotal $27.96 Tax $3.63 Total $31.59",
+    );
+    expect(html).not.toContain("Rounding");
+    expect(html).not.toContain("Total ordered");
+    expect(html).toContain(
+      "Dishes $26.55 Taken off by the restaurant −$6.55 Subtotal $20.00 Tax $2.60 Round total $22.60",
+    );
+    expect(html).toContain("Subtotal $7.96 Tax $1.03 Round total $8.99");
+    // Comped to nothing: every card and the total say so, and nothing is to pay.
+    const nothing = {
+      ...billed,
+      rounds: billed.rounds.map((entry) => ({
+        ...entry,
+        bill: lines(entry.bill.items.amountMinor, entry.bill.items.amountMinor, "0", "0", "0"),
+      })),
+      summary: { ...billed.summary, due: cad("0"), bill: lines("3451", "3451", "0", "0", "0") },
+    };
+    const free = text(render({ status: "ready", view: nothing, refreshing: false }));
+    expect(free).not.toContain("Round total $30.00");
+    expect(free).toContain("Round total $0.00");
+    expect(free).toContain("The restaurant took everything off: there is nothing to pay.");
+    expect(free).not.toContain("The table pays once at the end");
+  });
+
+  it("lists items before tax, then each round's and the table's subtotal, tax and total", () => {
+    const html = text(render({ status: "ready", view: priced, refreshing: false }));
+    expect(html).toContain("2 × Ramen $26.55");
+    expect(html).toContain("1 × Gyoza $7.96");
+    expect(html).toContain("Subtotal $26.55 Tax $3.45 Round total $30.00");
+    expect(html).toContain("Subtotal $7.96 Tax $1.04 Round total $9.00");
+    expect(html).toContain("Subtotal $34.51 Tax $4.49 Total ordered $39.00");
+    // What the table paid and still owes is unchanged.
+    expect(html).toContain("Paid so far $30.00");
+    expect(html).toContain("Waiting for payment $9.00");
+    expect(html).toContain("Item prices are before tax.");
+    expect(html).not.toContain("Discounts and fees");
+  });
+
+  it("keeps totals including tax, labelled so, when the prices before tax are not known", () => {
+    const html = text(render({ status: "ready", view: view(), refreshing: false }));
+    expect(html).toContain("2 × Ramen $30.00");
+    expect(html).toContain("Round total including tax $30.00");
+    expect(html).not.toContain("Subtotal");
+    expect(html).not.toContain("Item prices are before tax.");
+  });
+  it("WP-2423 item 5: tells guests when an unpaid round with no payment started is cancelled", () => {
+    const html = render({
+      status: "ready",
+      refreshing: false,
+      view: view({
+        rounds: [
+          round({
+            orderedBy: "Staff",
+            status: "AwaitingPayment",
+            payment: "Awaiting",
+            cancelsAt: "2026-10-13T18:40:00.000Z",
+          }),
+          round({ roundNumber: 2, status: "NotPaidCancelled", payment: "NotCharged" }),
+        ],
+      }),
+    });
+    expect(html).toContain("Pay them on the card machine and the kitchen starts it.");
+    expect(html).toContain(
+      `If it isn&#x27;t paid by ${formatClockTime("2026-10-13T18:40:00.000Z")}, it is cancelled and nobody is charged.`,
+    );
+    expect(html).toContain("Cancelled — not paid");
+    expect(html).toContain("No one was charged for it.");
+  });
+
+  it("v15 batch-5: a round stopped before anyone paid shows no tax or total, and says its dishes went back", () => {
+    const html = render({
+      status: "ready",
+      refreshing: false,
+      view: view({
+        rounds: [
+          round({
+            status: "NotPaidCancelled",
+            payment: "NotCharged",
+            stoppedBeforePaying: true,
+            subtotal: cad("1178"),
+            tax: cad("153"),
+            itemsTotal: cad("1331"),
+          }),
+          round({
+            roundNumber: 2,
+            status: "NotPaidCancelled",
+            payment: "NotCharged",
+            subtotal: cad("1178"),
+            tax: cad("153"),
+            itemsTotal: cad("1331"),
+          }),
+        ],
+      }),
+    });
+    expect(html).toContain(
+      "This round was stopped before anyone paid, and its dishes went back to your table’s cart. Nobody was charged for it.",
+    );
+    expect(html).toContain("This round never went to the kitchen. No one was charged for it.");
+    expect(html).not.toContain("$1.53");
+    expect(html).not.toContain("$13.31");
+    expect(html.match(/Not charged/gu)?.length).toBeGreaterThanOrEqual(2);
+  });
+
+  // v15 b20 live check: a pay-at-end round staff took off the bill read Subtotal $12.50, Tax $1.63
+  // and Round total $14.13 (本轮合计) under "Not charged", as if it were owed.
+  it("v15 b20: a round staff took off a table's bill shows no subtotal, tax or round total", () => {
+    const taken = round({
+      roundNumber: 2,
+      orderedBy: "Staff",
+      status: "StoreCancelled",
+      payment: "NotCharged",
+      storeCancellationReason: "SoldOut",
+      items: [
+        {
+          displayName: "Beef noodles",
+          quantity: 1,
+          servedQuantity: 0,
+          cancelled: true,
+          lineTotal: cad("1413"),
+          priceBeforeTax: cad("1250"),
+        },
+      ],
+      subtotal: cad("1250"),
+      tax: cad("163"),
+      itemsTotal: cad("1413"),
+    });
+    const html = text(
+      render({
+        status: "ready",
+        refreshing: false,
+        view: view({ paymentTiming: "PayLater", rounds: [taken], summary: null }),
+      }),
+    );
+    expect(html).toContain("Staff took this round off the bill. It is not charged.");
+    // b28 (v15 live26): its status says the same, never "Cancelled by the store".
+    expect(html).toContain("Status Taken off the bill");
+    expect(html).not.toContain("Cancelled by the store");
+    expect(html).toContain("Round total Not charged");
+    expect(html).not.toContain("$1.63");
+    expect(html).not.toContain("$14.13");
+    const zh = text(
+      renderToStaticMarkup(
+        <LanguageRoot initial="zh-Hans">
+          {() => (
+            <MemoryRouter initialEntries={["/dine-in/session"]}>
+              <DiningSessionScreen
+                state={{
+                  status: "ready",
+                  refreshing: false,
+                  view: view({ paymentTiming: "PayLater", rounds: [taken], summary: null }),
+                }}
+                store={store}
+                onRefresh={() => undefined}
+              />
+            </MemoryRouter>
+          )}
+        </LanguageRoot>,
+      ),
+    );
+    renderToStaticMarkup(<LanguageRoot initial="en">{() => null}</LanguageRoot>);
+    expect(zh).toContain("本轮合计 未扣款");
+    expect(zh).toContain("状态 已从账单删除");
+    expect(zh).not.toContain("门店取消");
+    expect(zh).not.toContain("$14.13");
+  });
+
+  // v15 b20 live check: a paid round with the Lemon tea cancelled and refunded ($5.37) read only
+  // "Paid" and its full total; the refund showed only in the table's combined line.
+  it("v15 b20: a paid round with a dish refunded says on that round what went back", () => {
+    const items = [
+      { ...round().items[0], displayName: "Steamed rice", lineTotal: cad("282") },
+      {
+        displayName: "Lemon tea",
+        quantity: 1,
+        servedQuantity: 0,
+        cancelled: true,
+        lineTotal: cad("537"),
+      },
+    ] as DiningRound["items"];
+    const refundedRound = round({ items, itemsTotal: cad("819"), refunded: cad("537") });
+    const html = text(
+      render({ status: "ready", refreshing: false, view: view({ rounds: [refundedRound] }) }),
+    );
+    expect(html).toContain("Round total including tax $8.19 Refunded $5.37");
+    const pending = text(
+      render({
+        status: "ready",
+        refreshing: false,
+        view: view({
+          rounds: [round({ items, itemsTotal: cad("819"), refundPending: cad("537") })],
+        }),
+      }),
+    );
+    expect(pending).toContain("Round total including tax $8.19 Refund on its way $5.37");
+    expect(text(render({ status: "ready", refreshing: false, view: view() }))).not.toContain(
+      "Refunded $",
+    );
+  });
+
+  // b25: on a table paying at the end, Orders and checkout say a dish staff took off reads
+  // "Taken off the bill · not charged"; the guest page said only "Cancelled". b25 final: that
+  // wording follows the read's `takenOff` (staff took it off the bill before it was charged), not
+  // the round's payment, so a guest is never told a dish is not charged while the bill charges it.
+  describe("b25: Taken off the bill · not charged only for a dish staff took off the bill", () => {
+    const rice = { ...round().items[0], displayName: "Steamed rice", lineTotal: cad("282") };
+    const tea = {
+      displayName: "Lemon tea",
+      quantity: 1,
+      servedQuantity: 0,
+      cancelled: true,
+      lineTotal: cad("537"),
+    };
+    const both = (language: "en" | "zh-Hans", rounds: DiningRound[], timing = "PayLater") => {
+      const state = {
+        status: "ready",
+        refreshing: false,
+        view: view({
+          paymentTiming: timing as DiningSessionView["paymentTiming"],
+          rounds,
+          summary: null,
+        }),
+      } as const;
+      const html = text(
+        renderToStaticMarkup(
+          <LanguageRoot initial={language}>
+            {() => (
+              <MemoryRouter initialEntries={["/dine-in/session"]}>
+                <DiningSessionScreen state={state} store={store} onRefresh={() => undefined} />
+              </MemoryRouter>
+            )}
+          </LanguageRoot>,
+        ),
+      );
+      renderToStaticMarkup(<LanguageRoot initial="en">{() => null}</LanguageRoot>);
+      return html;
+    };
+
+    it("a dish staff took off, on the bill or after the table paid at the end, says so (en, zh)", () => {
+      const items = [rice, { ...tea, takenOff: true as const }] as DiningRound["items"];
+      for (const payment of ["OnTableBill", "Paid"] as const) {
+        const rounds = [round({ payment, items, itemsTotal: cad("282") })];
+        const en = both("en", rounds);
+        expect(en).toContain("Lemon tea $5.37 Taken off the bill · not charged");
+        expect(en).not.toContain("Cancelled");
+        const zh = both("zh-Hans", rounds);
+        expect(zh).toContain("已从账单删除 · 不收费");
+        expect(zh).not.toContain("已取消");
+      }
+    });
+
+    it("a pay-first round never paid reads Cancelled: nothing was taken off a bill (en, zh)", () => {
+      const items = [{ ...rice, cancelled: true, servedQuantity: 0 }, tea] as DiningRound["items"];
+      const rounds = [
+        round({ status: "NotPaidCancelled", payment: "NotCharged", items, itemsTotal: cad("819") }),
+      ];
+      const en = both("en", rounds, "PayFirst");
+      expect(en).toContain("Lemon tea $5.37 Cancelled");
+      expect(en).not.toContain("Taken off the bill");
+      const zh = both("zh-Hans", rounds, "PayFirst");
+      expect(zh).toContain("已取消");
+      expect(zh).not.toContain("已从账单删除");
+    });
+
+    it("a dish the kitchen refused that stays on the table's bill is never called not charged (en, zh)", () => {
+      const items = [rice, tea] as DiningRound["items"];
+      const rounds = [round({ payment: "OnTableBill", items, itemsTotal: cad("819") })];
+      const en = both("en", rounds);
+      expect(en).toContain("Lemon tea $5.37 Cancelled");
+      expect(en).not.toMatch(/not charged/iu);
+      const zh = both("zh-Hans", rounds);
+      expect(zh).toContain("已取消");
+      expect(zh).not.toContain("不收费");
+      // A round the kitchen refused whole stays on the bill: never "not charged" or "refunded".
+      const whole = [
+        round({
+          status: "StoreCancelled",
+          payment: "OnTableBill",
+          items: [tea] as DiningRound["items"],
+          itemsTotal: cad("537"),
+        }),
+      ];
+      const wholeEn = both("en", whole);
+      expect(wholeEn).toContain(
+        "This round is still on the table's bill. Ask staff to take it off.".replace("'", "&#x27;"),
+      );
+      expect(wholeEn).toContain("Lemon tea $5.37 Cancelled");
+      expect(wholeEn).not.toMatch(/not charged|refund/iu);
+      const wholeZh = both("zh-Hans", whole);
+      expect(wholeZh).toContain("这一轮仍在本桌账单上，请让店员删除。");
+      expect(wholeZh).not.toMatch(/不收费|退/u);
+    });
+
+    it("a paid round's refunded dish still reads Cancelled", () => {
+      const items = [rice, tea] as DiningRound["items"];
+      const paid = text(
+        render({
+          status: "ready",
+          refreshing: false,
+          view: view({ rounds: [round({ items, itemsTotal: cad("819"), refunded: cad("537") })] }),
+        }),
+      );
+      expect(paid).toContain("Lemon tea $5.37 Cancelled");
+      expect(paid).not.toContain("Taken off the bill");
+    });
+  });
+});
+
+it("WP-2423 D5: a round from another day shows its date, today's only its time", () => {
+  const now = Date.parse("2026-10-15T18:00:00");
+  const today = new Date("2026-10-15T12:05:00").toISOString();
+  const earlier = new Date("2026-10-11T19:40:00").toISOString();
+  expect(roundTime(today, now)).toBe(formatClockTime(today));
+  const dated = roundTime(earlier, now);
+  expect(dated).toContain("Oct");
+  expect(dated).toContain("11");
+  expect(dated).not.toBe(formatClockTime(earlier));
+});
+
+describe("batch 52 (v15 b51 live): the Table total names what the table owes one way per moment", () => {
+  const owed = (paid: string, due: string, splitParts?: { count: null; paid: number }) =>
+    render({
+      status: "ready",
+      view: view({
+        paymentTiming: "PayLater",
+        summary: {
+          paid: cad(paid),
+          refunded: cad("0"),
+          refundPending: cad("0"),
+          due: cad(due),
+          ...(splitParts === undefined ? {} : { splitParts }),
+        },
+      }),
+      refreshing: false,
+    })
+      .replace(/<[^>]+>/gu, " ")
+      .replace(/\s+/gu, " ");
+  it("nothing paid: paid at the end", () => {
+    const html = owed("0", "2825");
+    expect(html).toContain("Paid so far $0.00 To pay at the end $28.25");
+    expect(html).not.toContain("Still to pay");
+  });
+  it("a part paid: still to pay", () => {
+    const html = owed("1413", "1412", { count: null, paid: 1 });
+    expect(html).toContain("Paid so far $14.13 Still to pay $14.12");
+    expect(html).not.toContain("To pay at the end");
+  });
+  it("all paid (the split is no longer spoken of): paid, and no line for what is left", () => {
+    const html = owed("2825", "0");
+    expect(html).toContain("Paid $28.25");
+    expect(html).not.toContain("Paid so far");
+    expect(html).not.toContain("To pay at the end");
+    expect(html).not.toContain("Still to pay");
+    expect(html).not.toContain("Nothing");
+  });
+});
+
+describe("batch 53 (v15 b52 live): the Table total note says how a split bill was paid", () => {
+  // The v15 b52 read: guest A paid their own dish online (14.13), guest C the rest (14.12).
+  const note = (
+    language: "en" | "zh-Hans",
+    paid: string,
+    due: string,
+    splitParts: { count: number | null; paid: number } | undefined,
+    closedByStaff = false,
+    cashRounding = "0",
+  ) => {
+    const state = {
+      status: "ready",
+      refreshing: false,
+      view: view({
+        paymentTiming: "PayLater",
+        summary: {
+          paid: cad(paid),
+          refunded: cad("0"),
+          refundPending: cad("0"),
+          due: cad(due),
+          tableTip: cad("0"),
+          cashRounding: cad(cashRounding),
+          ...(splitParts === undefined ? {} : { splitParts }),
+          ...(closedByStaff ? { closedByStaff: true as const } : {}),
+        },
+      }),
+    } as const;
+    const html = renderToStaticMarkup(
+      <LanguageRoot initial={language}>
+        {() => (
+          <MemoryRouter initialEntries={["/dine-in/session"]}>
+            <DiningSessionScreen state={state} store={store} onRefresh={() => undefined} />
+          </MemoryRouter>
+        )}
+      </LanguageRoot>,
+    )
+      .replace(/<[^>]+>/gu, " ")
+      .replace(/\s+/gu, " ");
+    renderToStaticMarkup(<LanguageRoot initial="en">{() => null}</LanguageRoot>);
+    return html;
+  };
+  it("paid in full by dish in 2 payments: never paid once at the end (en, zh)", () => {
+    // Batch 65: one of the two paid cash at the counter and it was rounded (2 cents).
+    const en = note("en", "2825", "0", { count: null, paid: 2 }, false, "2");
+    expect(en).toContain(
+      "The table paid by dish, in 2 payments. Cash is rounded to the nearest 5 cents; card and phone payments are not rounded.",
+    );
+    expect(en).not.toContain("paid once at the end");
+    expect(en).not.toContain("paying by dish");
+    const zh = note("zh-Hans", "2825", "0", { count: null, paid: 2 }, false, "2");
+    expect(zh).toContain("这桌已按菜分 2 笔付清。现金按 5 分取整，刷卡和手机付款不取整。");
+    expect(zh).not.toContain("最后一起付清");
+    expect(zh).not.toContain("按菜付款");
+  });
+  it("staff's split paid in full: paid in its parts; one payment by dish: one payment", () => {
+    expect(note("en", "2825", "0", { count: 3, paid: 3 })).toContain(
+      "The table paid the bill in 3 parts.",
+    );
+    expect(note("zh-Hans", "2825", "0", { count: 3, paid: 3 })).toContain("这桌已分 3 份付清。");
+    expect(note("en", "2825", "0", { count: null, paid: 1 })).toContain(
+      "The table paid in one payment.",
+    );
+    expect(note("zh-Hans", "2825", "0", { count: null, paid: 1 })).toContain("这桌已一笔付清。");
+  });
+  it("part paid: rounding is said only for cash at the counter, never for the rest paid online", () => {
+    const en = note("en", "1413", "1412", { count: null, paid: 1 });
+    expect(en).toContain(
+      "The table is paying by dish; 1 paid so far. Cash at the counter is rounded to the nearest 5 cents; card and phone payments are not.",
+    );
+    expect(en).not.toMatch(/so far\. Cash is rounded/u);
+    const zh = note("zh-Hans", "1413", "1412", { count: null, paid: 1 });
+    expect(zh).toContain(
+      "这桌按菜付款，已付 1 笔。在柜台付现金按 5 分取整，刷卡和手机付款不取整。",
+    );
+    expect(note("en", "1413", "1412", { count: 2, paid: 1 })).toContain(
+      "The table is paying the bill in parts: 1 of 2 parts paid. Cash at the counter is rounded to the nearest 5 cents; card and phone payments are not.",
+    );
+    expect(note("zh-Hans", "1413", "1412", { count: 2, paid: 1 })).toContain(
+      "这桌分份付款：2 份付了 1 份。在柜台付现金按 5 分取整，刷卡和手机付款不取整。",
+    );
+  });
+  it("staff wrote off the rest after part was paid: never says the table paid in full", () => {
+    // Batch 54 (v15 b53 live, order 52): staff closed the bill after an unpaid departure (owed 0,
+    // closedByStaff). The note says what was paid, that staff closed it, and that the rest is not
+    // charged; never "paid in one payment" or 结 (which reads as settled).
+    const byDish = note("en", "1413", "0", { count: null, paid: 1 }, true);
+    expect(byDish).toContain(
+      "Staff closed your table’s bill: the table paid by dish (1 paid), and the rest is not charged to you.",
+    );
+    expect(byDish).not.toContain("The table paid in one payment.");
+    const zhByDish = note("zh-Hans", "1413", "0", { count: null, paid: 1 }, true);
+    expect(zhByDish).toContain("店员已关闭本桌账单：这桌按菜付了 1 笔，其余不向您收取。");
+    expect(zhByDish).not.toMatch(/付清|结这张单/u);
+    const fixed = note("en", "942", "0", { count: 3, paid: 1 }, true);
+    expect(fixed).toContain(
+      "Staff closed your table’s bill: the table paid 1 of the 3 parts, and the rest is not charged to you.",
+    );
+    expect(fixed).not.toContain("The table paid the bill in 3 parts.");
+    expect(note("zh-Hans", "942", "0", { count: 3, paid: 1 }, true)).toContain(
+      "店员已关闭本桌账单：这桌 3 份付了 1 份，其余不向您收取。",
+    );
+    // Batch 56 (v15 b55 live, order 87): nothing more will be collected, so no cash rounding.
+    for (const closed of [
+      byDish,
+      zhByDish,
+      fixed,
+      note("zh-Hans", "942", "0", { count: 3, paid: 1 }, true),
+    ])
+      expect(closed).not.toMatch(/5 cents|rounded|取整/u);
+  });
+  it("the rest taken off after 1 of 3 parts was paid: says 1 of 3, never paid in 3 parts", () => {
+    const en = note("en", "1413", "0", { count: 3, paid: 1 }, false, "2");
+    expect(en).toContain(
+      "The table paid 1 of the 3 parts; nothing is left to pay. Cash is rounded to the nearest 5 cents; card and phone payments are not rounded.",
+    );
+    expect(en).not.toContain("The table paid the bill in 3 parts.");
+    expect(en).not.toContain("paid so far");
+    expect(note("zh-Hans", "1413", "0", { count: 3, paid: 1 }, false, "2")).toContain(
+      "这桌 3 份付了 1 份，已无需再付。现金按 5 分取整，刷卡和手机付款不取整。",
+    );
+  });
+  // Batch 65 (v15 b64 live F13): C64 A paid the whole table online ($28.25, rounding 0), and Your
+  // table still told the phone payer how cash is rounded. Nothing was paid in cash, so nothing was
+  // rounded: the note says how the table paid and stops there.
+  it("paid on phones or by card (no cash rounding): never tells the guest how cash is rounded", () => {
+    const cases: readonly [
+      { count: number | null; paid: number } | undefined,
+      string,
+      string,
+      string,
+    ][] = [
+      [undefined, "2825", "The table paid once at the end.", "这桌已在最后一起付清。"],
+      [{ count: null, paid: 1 }, "2825", "The table paid in one payment.", "这桌已一笔付清。"],
+      [
+        { count: null, paid: 2 },
+        "2825",
+        "The table paid by dish, in 2 payments.",
+        "这桌已按菜分 2 笔付清。",
+      ],
+      [{ count: 2, paid: 2 }, "2825", "The table paid the bill in 2 parts.", "这桌已分 2 份付清。"],
+      [
+        { count: 3, paid: 1 },
+        "1413",
+        "The table paid 1 of the 3 parts; nothing is left to pay.",
+        "这桌 3 份付了 1 份，已无需再付。",
+      ],
+    ];
+    for (const [parts, paid, en, zh] of cases) {
+      const english = note("en", paid, "0", parts);
+      expect(english).toContain(en);
+      expect(english).not.toMatch(/Cash|5 cents|rounded/u);
+      const chinese = note("zh-Hans", paid, "0", parts);
+      expect(chinese).toContain(zh);
+      expect(chinese).not.toMatch(/现金|取整/u);
+    }
+    // Paid once at the end with cash that was rounded: the bill's Cash rounding line is explained.
+    expect(note("en", "2825", "0", undefined, false, "-1")).toContain(
+      "The table paid once at the end. Cash is rounded to the nearest 5 cents; card and phone payments are not rounded.",
+    );
+    expect(note("zh-Hans", "2825", "0", undefined, false, "-1")).toContain(
+      "这桌已在最后一起付清。现金按 5 分取整，刷卡和手机付款不取整。",
+    );
+  });
+});
+
+describe("batch 54 (v15 b53 live): a bill staff closed after the guests left", () => {
+  // The v15 b53 read of order 52 ($28.25 bill): what was paid, owed 0, closedByStaff.
+  const closed = (
+    language: "en" | "zh-Hans",
+    paid: string,
+    splitParts?: { count: number | null; paid: number },
+  ) => {
+    const state = {
+      status: "ready",
+      refreshing: false,
+      view: view({
+        paymentTiming: "PayLater",
+        summary: {
+          paid: cad(paid),
+          refunded: cad("0"),
+          refundPending: cad("0"),
+          due: cad("0"),
+          ...(paid === "0" ? {} : { tableTip: cad("0"), cashRounding: cad("0") }),
+          ...(splitParts === undefined ? {} : { splitParts }),
+          closedByStaff: true as const,
+        },
+      }),
+    } as const;
+    const html = renderToStaticMarkup(
+      <LanguageRoot initial={language}>
+        {() => (
+          <MemoryRouter initialEntries={["/dine-in/session"]}>
+            <DiningSessionScreen state={state} store={store} onRefresh={() => undefined} />
+          </MemoryRouter>
+        )}
+      </LanguageRoot>,
+    );
+    renderToStaticMarkup(<LanguageRoot initial="en">{() => null}</LanguageRoot>);
+    const total = html.slice(html.indexOf('id="dining-summary-heading"'));
+    const section = total.slice(0, total.indexOf("</section>"));
+    return {
+      rows: [...section.matchAll(/<dt>([^<]*)<\/dt><dd>([^<]*)<\/dd>/gu)].map((row) => [
+        row[1],
+        row[2],
+      ]),
+      text: section.replace(/<[^>]+>/gu, " ").replace(/\s+/gu, " "),
+      page: html,
+    };
+  };
+  it("by dish, one dish paid: Paid, the rest not charged, and why (en, zh)", () => {
+    const en = closed("en", "1413", { count: null, paid: 1 });
+    expect(en.rows).toEqual([
+      ["Paid", "$14.13"],
+      ["Rest of the bill", "Not charged to you"],
+    ]);
+    expect(en.text).toContain(
+      "Staff closed your table’s bill: the table paid by dish (1 paid), and the rest is not charged to you.",
+    );
+    expect(en.text).not.toMatch(/Paid so far|paid in one payment|paid in full|Nothing/u);
+    const zh = closed("zh-Hans", "1413", { count: null, paid: 1 });
+    expect(zh.rows).toEqual([
+      ["已付款", "$14.13"],
+      ["其余账款", "不向您收取"],
+    ]);
+    expect(zh.text).toContain("店员已关闭本桌账单：这桌按菜付了 1 笔，其余不向您收取。");
+    expect(zh.text).not.toMatch(/付清|结这张单|已付 |无$/u);
+  });
+  it("staff's split, 1 of 3 parts paid: says 1 of 3 and the rest not charged (en, zh)", () => {
+    const en = closed("en", "942", { count: 3, paid: 1 });
+    expect(en.rows).toEqual([
+      ["Paid", "$9.42"],
+      ["Rest of the bill", "Not charged to you"],
+    ]);
+    expect(en.text).toContain(
+      "Staff closed your table’s bill: the table paid 1 of the 3 parts, and the rest is not charged to you.",
+    );
+    const zh = closed("zh-Hans", "942", { count: 3, paid: 1 });
+    expect(zh.rows).toEqual([
+      ["已付款", "$9.42"],
+      ["其余账款", "不向您收取"],
+    ]);
+    expect(zh.text).toContain("店员已关闭本桌账单：这桌 3 份付了 1 份，其余不向您收取。");
+  });
+  it("a payment on the whole bill, then closed: what was paid stays paid (en, zh)", () => {
+    expect(closed("en", "1000").text).toContain(
+      "Staff closed your table’s bill: what the table paid stays paid, and the rest is not charged to you.",
+    );
+    expect(closed("zh-Hans", "1000").text).toContain(
+      "店员已关闭本桌账单：已付的款项不变，其余不向您收取。",
+    );
+  });
+  it("nobody paid: nothing was charged; never 'pays once at the end' (en, zh)", () => {
+    const en = closed("en", "0");
+    expect(en.rows).toEqual([
+      ["Paid", "$0.00"],
+      ["The bill", "Not charged to you"],
+    ]);
+    expect(en.text).toContain("Staff closed your table’s bill; nothing was charged.");
+    expect(en.text).not.toMatch(/pays once at the end|To pay at the end|Cash is rounded/u);
+    // Staff closed the bill: nothing more is ordered here (no menu link, no "paying" note).
+    expect(en.page).not.toContain("Order more from the menu");
+    expect(closed("en", "1413", { count: null, paid: 1 }).page).not.toContain(
+      "Order more from the menu",
+    );
+    const zh = closed("zh-Hans", "0");
+    expect(zh.rows).toEqual([
+      ["已付款", "$0.00"],
+      ["账单", "不向您收取"],
+    ]);
+    expect(zh.text).toContain("店员已关闭本桌账单，未收取任何费用。");
+    expect(zh.text).not.toMatch(/最后一起|最后结账|取整/u);
+  });
+});
+
+describe("WP-2423 item 8 ④ v15 a: a table paying its split bill in parts", () => {
+  it("shows what is still to pay and says the table pays in parts", () => {
+    const html = render({
+      status: "ready",
+      view: view({
+        paymentTiming: "PayLater",
+        summary: {
+          paid: cad("680"),
+          refunded: cad("0"),
+          refundPending: cad("0"),
+          due: cad("339"),
+          splitParts: { count: 3, paid: 2 },
+        },
+      }),
+      refreshing: false,
+    });
+    expect(html).toContain("Still to pay");
+    expect(html).toContain("$3.39");
+    expect(html).toContain("The table is paying the bill in parts: 2 of 3 parts paid.");
+    expect(html).not.toContain("To pay at the end");
+    expect(html).not.toContain("The table paid once at the end");
+  });
+
+  it("v15 batch 7: a table paying by dish says how many paid, never a count of parts", () => {
+    const html = render({
+      status: "ready",
+      view: view({
+        paymentTiming: "PayLater",
+        summary: {
+          paid: cad("1413"),
+          refunded: cad("0"),
+          refundPending: cad("0"),
+          due: cad("2825"),
+          splitParts: { count: null, paid: 1 },
+        },
+      }),
+      refreshing: false,
+    });
+    expect(html).toContain("Still to pay");
+    expect(html).toContain("$28.25");
+    expect(html).toContain("The table is paying by dish; 1 paid so far.");
+    expect(html).not.toContain("parts");
+  });
+});
+
+it("Owner 2026-11-03: a receipt shows what went back", () => {
+  const html = renderToStaticMarkup(
+    <SettledTableReceiptView
+      receipt={parseSettledTableReceipt({
+        receipt: {
+          tableLabel: "T1",
+          rounds: [],
+          subtotalMinor: "1588",
+          taxMinor: "206",
+          ordersTotalMinor: "1794",
+          tipMinor: "0",
+          roundingMinor: "1",
+          paidMinor: "1795",
+          refundedMinor: "300",
+          split: false,
+          payments: [{ partNumber: null, method: "Cash", totalMinor: "1795" }],
+        },
+      })}
+    />,
+  );
+  expect(html).toContain("Refunded");
+  expect(html).toContain("$3.00");
+});
+
+describe("DEC-DINING-GUEST-TABLE-START: a table a guest started", () => {
+  const readyRound = (changes: Partial<DiningSessionView>) => {
+    const base = view(changes);
+    return render({
+      status: "ready",
+      view: {
+        ...base,
+        rounds: base.rounds.map((entry) => ({ ...entry, status: "Ready" as const })),
+      },
+      refreshing: false,
+    });
+  };
+  it("says a finished dish is ready by its number: nobody is bringing it over", () => {
+    const html = readyRound({ startedByGuest: true, orderNumber: "12" });
+    expect(html).toContain("Ready · collect order 12 at the counter");
+    expect(html).not.toContain("on its way to your table");
+  });
+  it("WP-2423 table-move-payment: tells a moved party's phone where it sits, quietly", () => {
+    const html = readyRound({ orderNumber: "12", movedFromTableLabel: "T6" });
+    expect(html).toMatch(
+      /<p class="dining-session__moved" role="status">Staff moved your party from table T6 to table [^<]+\. Keep ordering and paying on this phone\.<\/p>/u,
+    );
+    expect(readyRound({ orderNumber: "12" })).not.toContain("Staff moved your party");
+  });
+  it("a staff-opened table reads as it always did", () => {
+    const html = readyRound({ orderNumber: "12" });
+    expect(html).toContain("on its way to your table");
+    expect(html).not.toContain("collect order");
+  });
+  it("a dish being remade is called by its number too", () => {
+    const remade = (changes: Partial<DiningSessionView>) => {
+      const base = view(changes);
+      return render({
+        status: "ready",
+        view: {
+          ...base,
+          rounds: base.rounds.map((entry) => ({
+            ...entry,
+            payment: "Paid" as const,
+            items: entry.items.map((line) => ({ ...line, beingRemade: true })),
+          })),
+        },
+        refreshing: false,
+      });
+    };
+    expect(remade({ startedByGuest: true, orderNumber: "12" })).toContain(
+      "Being remade · collect order 12 at the counter when it&#x27;s ready",
+    );
+    expect(remade({ startedByGuest: true, orderNumber: "12" })).not.toContain(
+      "bring it to your table",
+    );
+    expect(remade({ orderNumber: "12" })).toContain("bring it to your table");
+  });
+});
+
+describe("batch 55 (v15 b54 live): round cards once staff closed the bill", () => {
+  // The v15 b54 reads at TM2: order 59 (nothing paid), 55 (guest A paid their own dish), 67 (staff
+  // split evenly in 2, part 1 paid; the server tied that part to round 1), then a write-off of the
+  // rest; and order 66, both dishes paid (no closedByStaff).
+  const noodles = (roundNumber: number, payment: DiningRound["payment"]) =>
+    round({
+      roundNumber,
+      orderedBy: roundNumber === 1 ? "You" : "AnotherGuest",
+      status: "Served",
+      payment,
+      items: [
+        {
+          displayName: "Beef noodles (TEST)",
+          quantity: 1,
+          servedQuantity: 1,
+          cancelled: false,
+          lineTotal: cad(roundNumber === 1 ? "1413" : "1412"),
+        },
+      ],
+      itemsTotal: cad(roundNumber === 1 ? "1413" : "1412"),
+    });
+  const payments = (
+    language: "en" | "zh-Hans",
+    rounds: readonly DiningRound[],
+    paid: string,
+    extra: Partial<NonNullable<DiningSessionView["summary"]>>,
+  ) => {
+    const state = {
+      status: "ready",
+      refreshing: false,
+      view: view({
+        paymentTiming: "PayLater",
+        rounds,
+        summary: {
+          paid: cad(paid),
+          refunded: cad("0"),
+          refundPending: cad("0"),
+          due: cad("0"),
+          ...extra,
+        },
+      }),
+    } as const;
+    const html = renderToStaticMarkup(
+      <LanguageRoot initial={language}>
+        {() => (
+          <MemoryRouter initialEntries={["/dine-in/session"]}>
+            <DiningSessionScreen state={state} store={store} onRefresh={() => undefined} />
+          </MemoryRouter>
+        )}
+      </LanguageRoot>,
+    );
+    renderToStaticMarkup(<LanguageRoot initial="en">{() => null}</LanguageRoot>);
+    const label = language === "en" ? "Payment" : zhHans["Payment"];
+    // Round 1 first (the page lists the newest round first).
+    return [...html.matchAll(new RegExp(`<dt>${label}</dt><dd>(.*?)</dd>`, "gu"))]
+      .map((row) => (row[1] ?? "").replace(/<[^>]+>/gu, "").replace(/&#x27;/gu, "'"))
+      .reverse();
+  };
+  it("order 59, nothing paid: the round is not charged, never on the table's bill", () => {
+    const closed = { closedByStaff: true as const };
+    expect(payments("en", [noodles(1, "OnTableBill")], "0", closed)).toEqual([
+      "Not charged to you",
+    ]);
+    expect(payments("zh-Hans", [noodles(1, "OnTableBill")], "0", closed)).toEqual(["不向您收取"]);
+  });
+  it("order 55, by dish: the dish paid stays Paid, the unpaid one is not charged", () => {
+    const closed = { closedByStaff: true as const, splitParts: { count: null, paid: 1 } };
+    const rounds = [noodles(1, "Paid"), noodles(2, "OnTableBill")];
+    // Batch 61 (v15 b60 live, CRT60 D round 2): nobody paid any of round 2, so it is not
+    // charged at all (before: "Unpaid part not charged to you" / 未付部分不向您收取).
+    expect(payments("en", rounds, "1413", closed)).toEqual(["Paid", "Not charged to you"]);
+    expect(payments("zh-Hans", rounds, "1413", closed)).toEqual(["已付款", "不向您收取"]);
+    // A round some guest paid a dish of (the read's partlyPaid) has an unpaid part.
+    const partly = [
+      noodles(1, "Paid"),
+      { ...noodles(2, "OnTableBill"), partlyPaid: true as const },
+    ];
+    expect(payments("en", partly, "1413", closed)).toEqual([
+      "Paid",
+      "Unpaid part not charged to you",
+    ]);
+    expect(payments("zh-Hans", partly, "1413", closed)).toEqual(["已付款", "未付部分不向您收取"]);
+  });
+  it("order 67, 1 of 2 equal parts: no round reads Paid as if it was what was paid", () => {
+    const closed = { closedByStaff: true as const, splitParts: { count: 2, paid: 1 } };
+    const rounds = [noodles(1, "Paid"), noodles(2, "OnTableBill")];
+    expect(payments("en", rounds, "1413", closed)).toEqual([
+      "1 of 2 parts paid; the rest not charged to you",
+      "1 of 2 parts paid; the rest not charged to you",
+    ]);
+    expect(payments("zh-Hans", rounds, "1413", closed)).toEqual([
+      "2\u00a0份付了 1\u00a0份，其余不向您收取",
+      "2\u00a0份付了 1\u00a0份，其余不向您收取",
+    ]);
+  });
+  // Batch 59 (v15 b58 live, TM2 L58R B order 23): part 1 of the even split (1413) was paid on
+  // a phone, staff closed the rest, then a manager gave all of it back to the card. The read
+  // (paidAfterRefunds 0, splitParts refunded 1) was right, yet every round said 2 份付了 1 份，
+  // 其余不向您收取 and the note "the table paid 1 of the 2 parts". L58R A (order 16): $8.00 of it
+  // back, 613 kept: part 1 is still paid.
+  const refundedFull = {
+    closedByStaff: true as const,
+    splitParts: { count: 2, paid: 1, refunded: 1 },
+    paidAfterRefunds: cad("0"),
+  };
+  const refundedPart = {
+    closedByStaff: true as const,
+    splitParts: { count: 2, paid: 1 },
+    paidAfterRefunds: cad("613"),
+  };
+  const tableTotal = (
+    language: "en" | "zh-Hans",
+    extra: Partial<NonNullable<DiningSessionView["summary"]>>,
+    open?: { readonly due: string },
+  ) => {
+    const html = renderToStaticMarkup(
+      <LanguageRoot initial={language}>
+        {() => (
+          <MemoryRouter initialEntries={["/dine-in/session"]}>
+            <DiningSessionScreen
+              state={{
+                status: "ready",
+                refreshing: false,
+                view: view({
+                  paymentTiming: "PayLater",
+                  rounds: [noodles(1, "Paid"), noodles(2, "OnTableBill")],
+                  summary: {
+                    paid: cad("1413"),
+                    refunded: cad("0"),
+                    refundPending: cad("0"),
+                    due: cad(open?.due ?? "0"),
+                    ...extra,
+                  },
+                }),
+              }}
+              store={store}
+              onRefresh={() => undefined}
+            />
+          </MemoryRouter>
+        )}
+      </LanguageRoot>,
+    );
+    renderToStaticMarkup(<LanguageRoot initial="en">{() => null}</LanguageRoot>);
+    const section =
+      /<section[^>]*aria-labelledby="dining-summary-heading"[^>]*>(.*?)<\/section>/su.exec(html);
+    return (section?.[1] ?? "").replace(/<[^>]+>/gu, "").replace(/&#x27;/gu, "'");
+  };
+  it("batch 59: part 1 given back in full is not paid: rounds and the Table total note (en, zh)", () => {
+    const rounds = [noodles(1, "Paid"), noodles(2, "OnTableBill")];
+    // Batch 60 (v15 b59 live, L59W A): staff's equal parts pay no round, so no round claims a
+    // refund (phone B's round 2 was never paid): each is not charged; the note says the refund.
+    expect(payments("en", rounds, "1413", refundedFull)).toEqual([
+      "Not charged to you",
+      "Not charged to you",
+    ]);
+    expect(payments("zh-Hans", rounds, "1413", refundedFull)).toEqual(["不向您收取", "不向您收取"]);
+    const en = tableTotal("en", refundedFull);
+    expect(en).toContain("Paid after refunds$0.00");
+    expect(en).toContain("The billNot charged to you");
+    expect(en).toContain(
+      "Staff closed your table’s bill: payments for 1 of the 2 parts went back in full; nothing is charged to you.",
+    );
+    expect(en).not.toMatch(/paid 1 of the 2 parts|1 of 2 parts paid|Rest of the bill|stays paid/u);
+    const zh = tableTotal("zh-Hans", refundedFull);
+    expect(zh).toContain("退款后已付$0.00");
+    expect(zh).toContain("店员已关闭本桌账单：这桌 2 份中有 1 份付款已全部退回，不向您收取。");
+    expect(zh).not.toMatch(/2\s?份付了\s?1\s?份|其余账款|不变/u);
+  });
+  // Batch 60 (v15 b58/b59 known limit): guests paid by dish (A round 1, B round 2); staff then
+  // gave back all or some of A's payment. Each round said its round-level "Paid" beside "Paid
+  // after refunds". The read ties the refund to the round its payment paid.
+  it("batch 60: by dish, a round whose payment went back says so; the payer reads its net", () => {
+    const refunded = (state: "Full" | "Partly", yours?: string): DiningRound => ({
+      ...noodles(1, "Paid"),
+      paymentRefund: {
+        state,
+        ...(yours === undefined ? {} : { yourPaidAfterRefunds: cad(yours) }),
+      },
+    });
+    const paidAll = {
+      splitParts: { count: null, paid: 2 },
+      paidAfterRefunds: cad("1412"),
+      tableTip: cad("0"),
+      cashRounding: cad("0"),
+    };
+    expect(payments("en", [refunded("Full"), noodles(2, "Paid")], "2825", paidAll)).toEqual([
+      "Refunded in full",
+      "Paid",
+    ]);
+    expect(payments("zh-Hans", [refunded("Full"), noodles(2, "Paid")], "2825", paidAll)).toEqual([
+      "已全额退款",
+      "已付款",
+    ]);
+    const partly = { ...paidAll, paidAfterRefunds: cad("2025") };
+    expect(payments("en", [refunded("Partly", "613"), noodles(2, "Paid")], "2825", partly)).toEqual(
+      ["Partly refunded; you paid $6.13 after refunds", "Paid"],
+    );
+    expect(
+      payments("zh-Hans", [refunded("Partly", "613"), noodles(2, "Paid")], "2825", partly),
+    ).toEqual(["部分退款，退款后您实付 $6.13", "已付款"]);
+    // Another phone: only that some went back, never an amount.
+    expect(payments("en", [refunded("Partly"), noodles(2, "Paid")], "2825", partly)).toEqual([
+      "Partly refunded",
+      "Paid",
+    ]);
+    expect(payments("zh-Hans", [refunded("Partly"), noodles(2, "Paid")], "2825", partly)).toEqual([
+      "部分退款",
+      "已付款",
+    ]);
+    // Staff closed the rest after A paid by dish: A's round, and B's round never paid.
+    const closedByDish = {
+      closedByStaff: true as const,
+      splitParts: { count: null, paid: 1 },
+      paidAfterRefunds: cad("613"),
+    };
+    expect(
+      payments("en", [refunded("Partly", "613"), noodles(2, "OnTableBill")], "1413", closedByDish),
+    ).toEqual(["Partly refunded; you paid $6.13 after refunds", "Not charged to you"]);
+    const allBack = {
+      closedByStaff: true as const,
+      splitParts: { count: null, paid: 1, refunded: 1 },
+      paidAfterRefunds: cad("0"),
+    };
+    expect(payments("en", [refunded("Full"), noodles(2, "OnTableBill")], "1413", allBack)).toEqual([
+      "Refunded in full; not charged to you",
+      "Not charged to you",
+    ]);
+    expect(
+      payments("zh-Hans", [refunded("Full"), noodles(2, "OnTableBill")], "1413", allBack),
+    ).toEqual(["已全部退回，不向您收取", "不向您收取"]);
+  });
+  it("batch 59: part 1 only partly given back is still paid, with the figure after refunds", () => {
+    const rounds = [noodles(1, "Paid"), noodles(2, "OnTableBill")];
+    expect(payments("en", rounds, "1413", refundedPart)).toEqual([
+      "1 of 2 parts paid; the rest not charged to you",
+      "1 of 2 parts paid; the rest not charged to you",
+    ]);
+    const en = tableTotal("en", refundedPart);
+    expect(en).toContain("Paid after refunds$6.13");
+    expect(en).toContain("Rest of the billNot charged to you");
+    expect(en).toContain(
+      "Staff closed your table’s bill: the table paid 1 of the 2 parts, and the rest is not charged to you.",
+    );
+    // 3 parts, 2 paid, one given back in full: 1 paid, the other said given back.
+    const mixed = {
+      closedByStaff: true as const,
+      splitParts: { count: 3, paid: 2, refunded: 1 },
+      paidAfterRefunds: cad("942"),
+    };
+    expect(tableTotal("en", mixed)).toContain(
+      "Staff closed your table’s bill: the table paid 1 of the 3 parts (payments for 1 more went back in full), and the rest is not charged to you.",
+    );
+    expect(tableTotal("zh-Hans", mixed)).toContain(
+      "店员已关闭本桌账单：这桌 3 份付了 1 份（另有 1 份付款已全部退回），其余不向您收取。",
+    );
+  });
+  it("batch 59: while the bill is open, a part given back is said as that, never paid", () => {
+    const open = {
+      due: cad("1412"),
+      splitParts: { count: 2, paid: 1, refunded: 1 },
+      paidAfterRefunds: cad("0"),
+    };
+    const rounds = [noodles(1, "Paid"), noodles(2, "OnTableBill")];
+    expect(payments("en", rounds, "1413", open)).toEqual([
+      "1 of 2 parts refunded in full",
+      "1 of 2 parts refunded in full",
+    ]);
+    expect(payments("zh-Hans", rounds, "1413", open)).toEqual([
+      "2\u00a0份中有 1\u00a0份已全部退回",
+      "2\u00a0份中有 1\u00a0份已全部退回",
+    ]);
+    const en = tableTotal("en", open, { due: "1412" });
+    expect(en).toContain("The table is paying the bill in parts: 0 of 2 parts paid.");
+    expect(en).toContain("Payments for 1 of the parts went back in full.");
+    expect(tableTotal("zh-Hans", open, { due: "1412" })).toContain("其中有 1 份付款已全部退回。");
+  });
+  it("ordinary bills keep their round payments (batch 53/54)", () => {
+    // Order 66: paid by dish in full; order 63: one payment; an open split with 1 of 2 paid.
+    const byDish = { splitParts: { count: null, paid: 2 } };
+    expect(payments("en", [noodles(1, "Paid"), noodles(2, "Paid")], "2825", byDish)).toEqual([
+      "Paid",
+      "Paid",
+    ]);
+    expect(payments("zh-Hans", [noodles(1, "Paid"), noodles(2, "Paid")], "2825", {})).toEqual([
+      "已付款",
+      "已付款",
+    ]);
+    expect(
+      payments("en", [noodles(1, "Paid"), noodles(2, "OnTableBill")], "1413", {
+        due: cad("1412"),
+        splitParts: { count: null, paid: 1 },
+      }),
+    ).toEqual(["Paid", "On the table's bill"]);
+    expect(payments("zh-Hans", [noodles(1, "OnTableBill")], "0", { due: cad("1413") })).toEqual([
+      "记入本桌账单",
+    ]);
+  });
+  it("batch 56, order 80: staff's equal parts while the bill is open say the parts, never one round paid", () => {
+    // v15 b55 live: part 1 of 2 was paid; the read tied it to round 1 (round 1 Paid, round 2 on
+    // the bill). A part is a share of the whole bill: every round says how many parts are paid.
+    const open = { due: cad("1412"), splitParts: { count: 2, paid: 1 } };
+    const rounds = [noodles(1, "Paid"), noodles(2, "OnTableBill")];
+    expect(payments("en", rounds, "1413", open)).toEqual([
+      "1 of 2 parts paid",
+      "1 of 2 parts paid",
+    ]);
+    expect(payments("zh-Hans", rounds, "1413", open)).toEqual([
+      "2\u00a0份付了 1\u00a0份",
+      "2\u00a0份付了 1\u00a0份",
+    ]);
+    // Staff split before anyone paid: the rounds are still on the table's bill.
+    expect(
+      payments("en", [noodles(1, "OnTableBill"), noodles(2, "OnTableBill")], "0", {
+        due: cad("2825"),
+        splitParts: { count: 2, paid: 0 },
+      }),
+    ).toEqual(["On the table's bill", "On the table's bill"]);
+    // Every part paid: Paid.
+    const paid = { splitParts: { count: 2, paid: 2 } };
+    expect(payments("en", [noodles(1, "Paid"), noodles(2, "Paid")], "2825", paid)).toEqual([
+      "Paid",
+      "Paid",
+    ]);
+    expect(payments("zh-Hans", [noodles(1, "Paid"), noodles(2, "Paid")], "2825", paid)).toEqual([
+      "已付款",
+      "已付款",
+    ]);
+  });
+});
+
+// Batch 63 (v15 batch 62 review D62B-14, F13): with checkout started and nothing paid yet, the
+// table total still said "To pay at the end" (最后结账); it said "Still to pay" only after a payment.
+describe("batch 63 (F13): what the table owes once checkout opens", () => {
+  const payLater = view({
+    paymentTiming: "PayLater",
+    summary: { paid: cad("0"), refunded: cad("0"), refundPending: cad("0"), due: cad("4464") },
+  });
+  const total = (checkingOut: boolean) =>
+    renderToStaticMarkup(<TableSummary view={payLater} checkingOut={checkingOut} />);
+  it("is Still to pay from the moment checkout opens, in a row as strong as a round's total", () => {
+    expect(total(false)).toContain("<dt>To pay at the end</dt>");
+    const open = total(true);
+    expect(open).toContain('<div class="dining-session__due"><dt>Still to pay</dt><dd>$44.64</dd>');
+    expect(open).not.toContain("To pay at the end");
+  });
+});
+
+// Batch 63 review: a dish where its round is says nothing, also on a paid round (pay-first or a
+// table already paid). The null answer must not fall through to the older "Served 0 of 2" line.
+describe("batch 63 review: a paid round's dish where its round is", () => {
+  const ramen = (progress: "Waiting" | "Making" | "Ready" | "Served", servedQuantity: number) => ({
+    displayName: "Ramen",
+    quantity: 2,
+    servedQuantity,
+    cancelled: false,
+    lineTotal: cad("3000"),
+    progress,
+  });
+  const paid = (status: DiningRound["status"], item: DiningRound["items"][number]) =>
+    render({
+      status: "ready",
+      view: view({ rounds: [round({ status, payment: "Paid", items: [item] })] }),
+      refreshing: false,
+    });
+
+  it("does not tell the guest 'Served 0 of 2' for a dish that is ready, waiting or being made", () => {
+    for (const [status, progress] of [
+      ["Ready", "Ready"],
+      ["Received", "Waiting"],
+      ["Preparing", "Making"],
+    ] as const) {
+      const html = paid(status, ramen(progress, 0));
+      expect(html).toContain("2 × Ramen");
+      expect(html).not.toContain("Served 0 of 2");
+      expect(html).not.toContain("Served</span>");
+    }
+  });
+
+  it("shows no count for a fully served dish under a served round", () => {
+    const html = paid("Served", ramen("Served", 2));
+    expect(html).not.toContain("Served 2 of 2");
+  });
+
+  it("still names a dish that is ahead of its round, and the count while partly served", () => {
+    expect(paid("Preparing", ramen("Ready", 0))).toContain("order-status__item-progress");
+    expect(paid("Serving", ramen("Served", 1))).toContain("Served 1 of 2");
+  });
+});

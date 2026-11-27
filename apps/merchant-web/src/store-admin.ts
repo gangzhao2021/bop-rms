@@ -1,3 +1,4 @@
+import { t } from "./i18n/i18n.js";
 export const STORE_SETUP_STEPS = [
   "Identity",
   "AddressTimezone",
@@ -106,7 +107,7 @@ export class StoreAdminClientError extends Error {
   readonly code: StoreAdminClientErrorCode;
 
   constructor(code: StoreAdminClientErrorCode) {
-    super("Store administration is unavailable");
+    super(t("Store administration is unavailable"));
     this.name = "StoreAdminClientError";
     this.code = code;
   }

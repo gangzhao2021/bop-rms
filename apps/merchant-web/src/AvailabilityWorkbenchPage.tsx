@@ -9,6 +9,7 @@ import {
   type AvailabilityClientErrorCode,
   type AvailabilityWorkbenchView,
 } from "./availability-workbench.js";
+import { timeZoneLabel } from "./time-zone-names.js";
 
 type LoadState =
   | { readonly kind: "Loading" | AvailabilityClientErrorCode }
@@ -105,7 +106,7 @@ export function AvailabilityWorkbenchScreen({
         <div>
           <h2>Availability Rule Workbench</h2>
           <p className="bop-muted">
-            {view.businessDate} · {view.timeZone} · as of {view.asOfUtc}
+            {view.businessDate} · {timeZoneLabel(view.timeZone)} · as of {view.asOfUtc}
           </p>
         </div>
         <button disabled title="A command-capable Availability BFF is not connected">
@@ -144,7 +145,7 @@ export function AvailabilityWorkbenchScreen({
       </div>
       <StatePanel heading="Effective-result simulation">
         <p>
-          Scenario uses the selected Store, channel, UTC instant, IANA time zone and Business Date.
+          Scenario uses the selected Store, channel, time, the Store's time zone and Business Date.
           Stock and Kill Switch evidence must be fresh and exact scoped.
         </p>
         <div className="card-actions">

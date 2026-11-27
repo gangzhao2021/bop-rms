@@ -1,9 +1,15 @@
 export type DependencyReadinessStatus = "not_configured" | "not_ready" | "ready" | "timeout";
 
 export type ReadinessProbe = () => Promise<"not_ready" | "ready"> | "not_ready" | "ready";
+/**
+ * WP-2423 (rush-connection-hold): whether the process's own database connections are all in use
+ * with requests waiting for one ("busy": a rush, served in turn) or not ("normal").
+ */
+export type LoadProbe = () => "busy" | "normal";
 
 export interface HealthReadinessOptions {
   databaseProbe?: ReadinessProbe;
+  loadProbe?: LoadProbe;
   negativeCacheMilliseconds?: number;
   now?: () => string;
   nowMilliseconds?: () => number;
@@ -28,8 +34,15 @@ export interface ReadinessSnapshot {
     database: {
       required: true;
       status: DependencyReadinessStatus;
+      /** WP-2423 (rush-connection-hold): its connections all in use, requests served in turn. */
+      load?: "busy" | "normal";
     };
   };
+  /**
+   * WP-2423 (rush-connection-hold): serving, but slower than usual (a rush). Readiness itself says
+   * whether this process serves at all; a rush never makes it "not ready".
+   */
+  degraded?: boolean;
   service: "bop-rms-api";
   status: "not_ready" | "ready";
 }
@@ -46,6 +59,7 @@ function requireBoundedMilliseconds(value: number, name: string, maximum: number
 
 export class HealthReadinessController {
   readonly #databaseProbe: ReadinessProbe | undefined;
+  readonly #loadProbe: LoadProbe | undefined;
   readonly #negativeCacheMilliseconds: number;
   readonly #now: () => string;
   readonly #nowMilliseconds: () => number;
@@ -58,6 +72,7 @@ export class HealthReadinessController {
 
   constructor({
     databaseProbe,
+    loadProbe,
     negativeCacheMilliseconds = 250,
     now = () => new Date().toISOString(),
     nowMilliseconds = Date.now,
@@ -65,6 +80,7 @@ export class HealthReadinessController {
     probeTimeoutMilliseconds = 1_000,
   }: HealthReadinessOptions = {}) {
     this.#databaseProbe = databaseProbe;
+    this.#loadProbe = loadProbe;
     this.#negativeCacheMilliseconds = requireBoundedMilliseconds(
       negativeCacheMilliseconds,
       "negativeCacheMilliseconds",
@@ -110,17 +126,29 @@ export class HealthReadinessController {
       databaseStatus = await this.#databaseReadiness();
 
     const ready = this.#lifecycleState === "accepting" && databaseStatus === "ready";
+    const load = ready ? this.#load() : undefined;
     return {
       checkedAt: this.#now(),
       dependencies: {
         database: {
           required: true,
           status: databaseStatus,
+          ...(load === undefined ? {} : { load }),
         },
       },
+      ...(load === undefined ? {} : { degraded: load === "busy" }),
       service,
       status: ready ? "ready" : "not_ready",
     };
+  }
+
+  #load(): "busy" | "normal" | undefined {
+    if (this.#loadProbe === undefined) return undefined;
+    try {
+      return this.#loadProbe() === "busy" ? "busy" : "normal";
+    } catch {
+      return undefined;
+    }
   }
 
   resourceSnapshot(): {

@@ -1,5 +1,7 @@
+import { parseDiningReference, parseDiningInstant } from "../domain/dining-session.js";
 import {
   parseQrCompact,
+  QrContractError,
   parseQrSignedPayload,
   parseQrTableContextEvidence,
   parseQrVerificationKeySetEvidence,
@@ -129,4 +131,123 @@ export function createQrTableContextService(ports: QrTableContextPorts) {
       }
     },
   });
+}
+
+/**
+ * WP-2423 (checkout-session-outage review): a refusal names which rule refused, as a safe code kept
+ * behind the plain contract error (never shown, never enumerated), so an API 503 can log it.
+ */
+function contextRefused(rule: string): QrContractError {
+  const error = new QrContractError();
+  Object.defineProperty(error, "cause", {
+    value: Object.freeze({ code: "QR_CONTEXT_" + rule }),
+    enumerable: false,
+  });
+  return error;
+}
+
+/** The first current-context rule this evidence fails, or null when it is current. */
+function staleContextRule(
+  raw: Record<string, unknown>,
+  context: ReturnType<typeof parseQrTableContextEvidence>,
+  expected: { brand: string; store: string; publicStore: string; publicTable: string; at: string },
+): string | null {
+  if (raw.channel !== "DineIn" || context.channel !== "DineIn") return "CHANNEL";
+  if (!Number.isSafeInteger(raw.qrRevocationVersion) || (raw.qrRevocationVersion as number) < 1)
+    return "SESSION_CODE_VERSION";
+  if (context.brandReference !== expected.brand || context.storeReference !== expected.store)
+    return "SCOPE";
+  if (
+    context.publicStoreReference !== expected.publicStore ||
+    context.publicTableReference !== expected.publicTable
+  )
+    return "TABLE_LINK";
+  if (context.tableReference === null) return "NO_TABLE";
+  if (context.revocationVersion !== raw.qrRevocationVersion) return "CODE_REISSUED";
+  if (context.brandLifecycle !== "Active" || context.storeLifecycle !== "Active")
+    return "STORE_NOT_ACTIVE";
+  if (context.tableLifecycle !== "Active") return "TABLE_NOT_ACTIVE";
+  if (context.assignmentState !== "Active") return "TABLE_NOT_ASSIGNED";
+  if (context.qrState !== "Enabled") return "CODE_DISABLED";
+  if (String(context.validUntil) <= expected.at) return "EXPIRED";
+  return null;
+}
+
+/** Current context for an already authenticated Guest; never verifies or reconstructs a signed QR. */
+export function assertCurrentDiningGuestTableContext(input: unknown, value: unknown) {
+  try {
+    const fields = [
+      "brandReference",
+      "storeReference",
+      "publicStoreReference",
+      "publicTableReference",
+      "channel",
+      "qrRevocationVersion",
+      "observedAt",
+    ];
+    if (
+      input === null ||
+      typeof input !== "object" ||
+      Object.getPrototypeOf(input) !== Object.prototype ||
+      Reflect.ownKeys(input).length !== fields.length
+    )
+      throw contextRefused("INPUT_INVALID");
+    const entries = fields.map((field) => {
+      const descriptor = Object.getOwnPropertyDescriptor(input, field);
+      if (!descriptor?.enumerable || !("value" in descriptor))
+        throw contextRefused("INPUT_INVALID");
+      return [field, descriptor.value] as const;
+    });
+    const raw = Object.fromEntries(entries);
+    const brand = String(parseDiningReference(raw.brandReference));
+    const store = String(parseDiningReference(raw.storeReference));
+    const publicStore = String(parseDiningReference(raw.publicStoreReference));
+    const publicTable = String(parseDiningReference(raw.publicTableReference));
+    const at = parseDiningInstant(raw.observedAt);
+    if (value === null || value === undefined) throw contextRefused("MISSING");
+    let context: ReturnType<typeof parseQrTableContextEvidence>;
+    try {
+      context = parseQrTableContextEvidence(value);
+    } catch {
+      throw contextRefused("EVIDENCE_INVALID");
+    }
+    const rule = staleContextRule(raw, context, {
+      brand,
+      store,
+      publicStore,
+      publicTable,
+      at: String(at),
+    });
+    if (rule !== null) throw contextRefused(rule);
+    return context;
+  } catch (error) {
+    throw error instanceof QrContractError ? error : contextRefused("INPUT_INVALID");
+  }
+}
+
+/**
+ * WP-2423: whether a code carries a good signature from this Store's keys. No database, no budget;
+ * a yes says nothing about the table or the code's state, which the entry still checks in full.
+ */
+export async function hasValidQrSignature(
+  ports: Pick<QrTableContextPorts, "keys" | "verifier">,
+  qrToken: string,
+): Promise<boolean> {
+  try {
+    if (!hasValidCompactFraming(qrToken)) return false;
+    const compact = parseQrCompact(qrToken);
+    const keySet = parseQrVerificationKeySetEvidence(await ports.keys.load());
+    const matches = keySet.keys.filter((key) => key.kid === compact.header.kid);
+    if (matches.length !== 1 || matches[0] === undefined) return false;
+    return (
+      (await ports.verifier.verify({
+        algorithm: "ES256",
+        publicKeyReference: matches[0].publicKeyReference,
+        signingInput: compact.signingInput,
+        signature: compact.signature,
+      })) === "Verified"
+    );
+  } catch {
+    return false;
+  }
 }

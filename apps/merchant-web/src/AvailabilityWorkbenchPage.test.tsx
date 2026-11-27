@@ -40,7 +40,9 @@ describe("CAT-AVAILABILITY", () => {
       </MemoryRouter>,
     );
     expect(html).toContain("CAT-AVAILABILITY");
-    expect(html).toContain("America/Toronto");
+    // WP-2423 item 7: the zone as staff read it, never the raw identifier.
+    expect(html).toContain("Eastern Time (Toronto");
+    expect(html).not.toContain("America/Toronto");
     expect(html).toContain("Lunch Bundle");
     expect(html).toContain("Simulate effective result");
     expect(html.match(/disabled/g)?.length).toBeGreaterThanOrEqual(6);

@@ -13,34 +13,16 @@ env:
   TURBO_TELEMETRY_DISABLED: "1"
 
 jobs:
-  verify:
-    name: verify
+  static:
+    name: static
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - name: Check out repository
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
-      - name: Set up Node.js
-        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
-        with:
-          node-version-file: .nvmrc
-          package-manager-cache: false
-
-      - name: Install exact package manager
-        run: |
-          npm install --global corepack@0.35.0
-          corepack enable pnpm
-          corepack install --global pnpm@11.13.0
-
-      - name: Verify tool versions
-        run: |
-          test "$(node --version)" = "v24.18.0"
-          test "$(corepack --version)" = "0.35.0"
-          test "$(pnpm --version)" = "11.13.0"
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Set up toolchain
+        uses: ./.github/actions/setup
 
       - name: Verify WP-0005 PostgreSQL local environment
         run: ./tooling/postgres/verify-local.sh
@@ -60,12 +42,14 @@ jobs:
           pnpm module-generator:check
           pnpm import-boundary:check
           pnpm database-ownership:check
+          pnpm database-permission:check
           pnpm domain-layer-boundary:check
           pnpm migration:check
           pnpm db:migrate -- --help
           pnpm foundation:check
           pnpm foundation:verify -- --help
           pnpm helpers:check
+          pnpm openapi:check
           pnpm helpers:verify -- --help
           pnpm screen-registry:check
           pnpm list --depth 0
@@ -82,14 +66,103 @@ jobs:
           pnpm lint
           pnpm typecheck
           pnpm screen-registry:check
-          pnpm test
           pnpm build
 
-      - name: Verify local demo browser acceptance
+  unit:
+    name: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Set up toolchain
+        uses: ./.github/actions/setup
+
+      - name: Build workspace
+        run: pnpm build
+
+      - name: Unit and package tests
+        run: |
+          pnpm exec vitest run
+          pnpm exec turbo run test
+
+  database:
+    name: database ${{ matrix.shard }}/12
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Set up toolchain
+        uses: ./.github/actions/setup
+
+      - name: Build workspace
+        run: pnpm build
+
+      - name: Install browser for database journeys
+        run: pnpm --filter @bop-rms/merchant-web exec playwright install --with-deps chromium
+
+      - name: PostgreSQL acceptance shard
+        env:
+          SHARD: ${{ matrix.shard }}
+          SHARDS: "12"
+        run: |
+          node -e 'const s=require("./package.json").scripts["test:database"]; const c=[...s.matchAll(/--config (\S+)/g)].map((m)=>m[1]); const mine=c.filter((_,i)=>i%Number(process.env.SHARDS)===Number(process.env.SHARD)-1); if(!c.length||!mine.length) process.exit(1); console.log(mine.join("\n"))' > "$RUNNER_TEMP/configs.txt"
+          echo "$(wc -l < "$RUNNER_TEMP/configs.txt") configs in this shard"
+          while read -r config; do
+            echo "::group::$config"
+            pnpm exec vitest run --config "$config" < /dev/null
+            echo "::endgroup::"
+          done < "$RUNNER_TEMP/configs.txt"
+
+  browser:
+    name: customer browser ${{ matrix.shard }}/2
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Set up toolchain
+        uses: ./.github/actions/setup
+
+      - name: Build workspace
+        run: pnpm build
+
+      # Batch 63: the customer suite alone takes about 35 minutes, so with the eventing checks it ran
+      # past the 45-minute limit; it is sharded like the merchant suite.
+      - name: Verify local demo browser acceptance shard
         run: |
           pnpm --filter @bop-rms/merchant-web exec playwright install --with-deps chromium
-          pnpm merchant-demo-browser:acceptance
-          pnpm customer-demo-browser:acceptance
+          pnpm customer-demo-browser:acceptance --shard=${{ matrix.shard }}/2
+
+  eventing:
+    name: customer lab and eventing
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Set up toolchain
+        uses: ./.github/actions/setup
+
+      - name: Build workspace
+        run: pnpm build
+
+      - name: Verify the local customer lab
+        run: |
+          pnpm --filter @bop-rms/merchant-web exec playwright install --with-deps chromium
           pnpm customer-lab:acceptance
 
       - name: Verify WP-0036 Realtime and Eventing regressions
@@ -111,3 +184,40 @@ jobs:
 
       - name: Verify WP-0024 isolated PostgreSQL lifecycle
         run: pnpm isolated-database:acceptance
+
+  merchant-browser:
+    name: merchant browser ${{ matrix.shard }}/3
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Set up toolchain
+        uses: ./.github/actions/setup
+
+      - name: Build workspace
+        run: pnpm build
+
+      - name: Merchant browser acceptance shard
+        run: |
+          pnpm --filter @bop-rms/merchant-web exec playwright install --with-deps chromium
+          pnpm --filter @bop-rms/merchant-web exec playwright test --shard=${{ matrix.shard }}/3
+
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: always()
+    needs: [static, unit, database, merchant-browser, browser, eventing]
+    steps:
+      - name: All verification jobs passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "$RESULTS"
+          for result in $RESULTS; do test "$result" = "success"; done

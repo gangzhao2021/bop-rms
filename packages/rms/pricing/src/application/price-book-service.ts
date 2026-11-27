@@ -91,6 +91,7 @@ async function authorize(
   audit: AppendAuditRecordInput;
   approvalAllowed: boolean;
   draftAuthor: PricingReference | null;
+  soleOperatorApproval: boolean;
 }> {
   const evidence = await ports.authorization
     .authorize({ action, operationReference, priceBookReference, observedAt: at })
@@ -116,6 +117,22 @@ async function authorize(
       audit.occurredAt !== at
     )
       throw new Error("denied");
+    const sole = evidence.soleOperatorApproval === true;
+    const single = evidence.singleStoreListing === true;
+    // WP-2423 Q19 / item 8 ⑥: a sole-operator or single-store publication says so in its Audit;
+    // any other carries no summary. DEC-BRAND-MULTI-STORE segment 9: a direct listing at a Brand
+    // with several Stores (by its Brand Owner) is marked BrandOwnerListing instead.
+    const summary = JSON.stringify(audit.afterSummary);
+    const listed =
+      summary === JSON.stringify({ approvalMode: "SingleStoreListing" }) ||
+      summary === JSON.stringify({ approvalMode: "BrandOwnerListing" });
+    if (
+      (sole && single) ||
+      sole !== (summary === JSON.stringify({ approvalMode: "SoleOperator" })) ||
+      single !== listed
+    )
+      throw new Error("denied");
+    const soleOperatorApproval = sole || single;
     const approvalAllowed =
       evidence.approvalPermission?.effect === "Allow" &&
       evidence.approvalPermission.action === "pricing.price-book.approve" &&
@@ -129,6 +146,7 @@ async function authorize(
         evidence.draftAuthorActorReference === null
           ? null
           : parsePricingReference(evidence.draftAuthorActorReference),
+      soleOperatorApproval,
     };
   } catch {
     throw new PriceBookWorkflowError("PRICE_BOOK_PERMISSION_DENIED");
@@ -218,6 +236,28 @@ function successor(
   )
     invalid();
 }
+// Publishing materializes a new immutable version/entry identity, but cannot
+// introduce content authored by the approver under another actor's draft.
+function publicationContent(snapshot: PriceBookSnapshot): string {
+  return JSON.stringify({
+    currencyMetadata: snapshot.currencyMetadata,
+    entries: snapshot.entries
+      .map((entry) =>
+        JSON.stringify([
+          entry.sellableReference,
+          entry.scopeKind,
+          entry.scopeReference,
+          entry.channelCode,
+          entry.orderType,
+          entry.amount.amountMinor.toString(),
+          entry.amount.currencyCode,
+          entry.effectivePeriod,
+          entry.reasonCode,
+        ]),
+      )
+      .sort(),
+  });
+}
 export function createPriceBookService(ports: PriceBookPorts) {
   async function commit(
     action: Exclude<PriceBookAction, "CreateDraft">,
@@ -254,11 +294,18 @@ export function createPriceBookService(ports: PriceBookPorts) {
     const auth = await authorize(ports, action, operationReference, reference, requestedAt);
     if (auth.brand !== current.brandReference)
       throw new PriceBookWorkflowError("PRICE_BOOK_PERMISSION_DENIED");
+    // Another person approves, except the author alone under an in-effect sole operator
+    // (WP-2423 Q19); the sole-operator mark is never accepted for someone else's draft.
     if (
-      requireApproval &&
-      (!auth.approvalAllowed || auth.draftAuthor === null || auth.draftAuthor === auth.actor)
+      (auth.soleOperatorApproval && (!requireApproval || auth.draftAuthor !== auth.actor)) ||
+      (requireApproval &&
+        (!auth.approvalAllowed ||
+          auth.draftAuthor === null ||
+          (auth.draftAuthor === auth.actor && !auth.soleOperatorApproval)))
     )
       throw new PriceBookWorkflowError("PRICE_BOOK_APPROVAL_REQUIRED");
+    if (action === "Publish" && publicationContent(candidate) !== publicationContent(current))
+      throw new PriceBookWorkflowError("PRICE_BOOK_INPUT_INVALID");
     if (
       action === "Publish" &&
       analyzePriceCoverage(candidate, contexts).some((item) => item.status !== "Covered")

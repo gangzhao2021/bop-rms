@@ -1,3 +1,4 @@
+import { createContractParsers } from "./contract-parsers.js";
 export type ComplianceAllergenIncidentPageErrorCode =
   | "PermissionDenied"
   | "NotFound"
@@ -115,11 +116,9 @@ export interface ComplianceIncidentView {
     readonly accessClass: "Restricted";
   };
 }
-const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const code = /^[A-Z][A-Z0-9_.:-]{0,63}$/u;
 const count = /^(?:0|[1-9][0-9]{0,29})$/u;
 const digestPattern = /^sha256:[0-9a-f]{64}$/u;
-const instantPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const fail = (): never => {
   throw new ComplianceAllergenIncidentPageError("Unavailable");
 };
@@ -139,10 +138,7 @@ function object(value: unknown, fields: readonly string[]) {
     fail();
   return value as Record<string, unknown>;
 }
-const oneOf = <T extends string>(value: unknown, values: readonly T[]) =>
-  typeof value === "string" && values.includes(value as T) ? (value as T) : fail();
-const reference = (value: unknown) =>
-  typeof value === "string" && uuid.test(value) ? value : fail();
+const { oneOf, reference, bool, instant } = createContractParsers(fail);
 const nullable = <T>(value: unknown, parse: (item: unknown) => T) =>
   value === null ? null : parse(value);
 const coded = (value: unknown) => (typeof value === "string" && code.test(value) ? value : fail());
@@ -150,16 +146,8 @@ const decimalCount = (value: unknown) =>
   typeof value === "string" && count.test(value) ? value : fail();
 const positive = (value: unknown) =>
   typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : fail();
-const bool = (value: unknown) => (typeof value === "boolean" ? value : fail());
 const digest = (value: unknown) =>
   typeof value === "string" && digestPattern.test(value) ? value : fail();
-const instant = (value: unknown) =>
-  typeof value === "string" &&
-  instantPattern.test(value) &&
-  Number.isFinite(Date.parse(value)) &&
-  new Date(Date.parse(value)).toISOString() === value
-    ? value
-    : fail();
 const severities = ["Observation", "Minor", "Major", "Critical", "ImmediateDanger"] as const;
 const reviewStatuses = ["Pending", "Approved", "Rejected", "Invalidated"] as const;
 const evidenceStatuses = ["Current", "Expired", "Conflicting", "Unverified"] as const;

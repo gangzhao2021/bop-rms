@@ -3,6 +3,7 @@ import type { ConsumerTransaction } from "@bop/eventing";
 
 import {
   CatalogError,
+  parsePublishedMenuSnapshot,
   buildPublishedMenuProjection,
   createMenuPublishedEnvelope,
   createPublishedMenuProjectionService,
@@ -279,4 +280,80 @@ describe("Published Menu Projection", () => {
       payload: { releaseReference: id(8) },
     });
   });
+});
+
+function quantitySnapshot() {
+  const value = snapshot();
+  const item = value.sections[0]?.sellables[0];
+  const rule = item?.optionRules[0];
+  const option = rule?.options[0];
+  if (!item || !rule || !option) throw new Error("fixture");
+  Object.assign(rule, {
+    semanticsVersion: 2,
+    activationOptionReferences: [],
+    channelCodes: ["DINE_IN"],
+    minimumSelections: 2,
+    maximumSelections: 3,
+    enabledOptionReferences: [option.optionReference],
+    defaultOptionReferences: [option.optionReference],
+    options: [
+      {
+        ...option,
+        maximumQuantity: 3,
+        selectedByDefault: true,
+        defaultQuantity: 2,
+        conflictOptionReferences: [],
+      },
+    ],
+  });
+  return { value, item, rule };
+}
+it("preserves quantity defaults beyond option count and retains old snapshot shape", () => {
+  const { value } = quantitySnapshot();
+  const parsed = parsePublishedMenuSnapshot(value);
+  expect(parsed.sections[0]?.sellables[0]?.optionRules[0]).toMatchObject({
+    semanticsVersion: 2,
+    minimumSelections: 2,
+    maximumSelections: 3,
+    options: [{ defaultQuantity: 2, maximumQuantity: 3 }],
+  });
+  const old = parsePublishedMenuSnapshot(snapshot()).sections[0]?.sellables[0]?.optionRules[0];
+  expect(old).not.toHaveProperty("semanticsVersion");
+  expect(old?.options[0]).not.toHaveProperty("defaultQuantity");
+});
+it("rejects invalid quantity defaults, dangling activation and cycles", () => {
+  const bad = quantitySnapshot();
+  Object.assign(bad.rule.options[0] ?? {}, { defaultQuantity: 4 });
+  expect(() => parsePublishedMenuSnapshot(bad.value)).toThrow(CatalogError);
+  const dangling = quantitySnapshot();
+  Object.assign(dangling.rule, { activationOptionReferences: [id(999)] });
+  expect(() => parsePublishedMenuSnapshot(dangling.value)).toThrow(CatalogError);
+  const cycle = quantitySnapshot();
+  const parent = cycle.rule.options[0];
+  if (!parent) throw new Error("fixture");
+  Object.assign(cycle.rule, { activationOptionReferences: [id(71)] });
+  Object.assign(cycle.item, {
+    optionRules: [
+      cycle.rule,
+      {
+        ...cycle.rule,
+        bindingReference: id(70),
+        activationOptionReferences: [parent.optionReference],
+        minimumSelections: 0,
+        maximumSelections: 1,
+        enabledOptionReferences: [id(71)],
+        defaultOptionReferences: [],
+        options: [
+          {
+            ...parent,
+            optionReference: id(71),
+            maximumQuantity: 1,
+            selectedByDefault: false,
+            defaultQuantity: 0,
+          },
+        ],
+      },
+    ],
+  });
+  expect(() => parsePublishedMenuSnapshot(cycle.value)).toThrow(CatalogError);
 });

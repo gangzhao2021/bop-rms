@@ -16,8 +16,16 @@ tables.
 - Writes require Brand scope, Actor, purpose, `recipe.manage`, Expected Version, idempotency,
   append-only Audit and an atomic minimal Event. Publish additionally requires independent Cost and
   Food Safety reviewers with exact evidence.
-- Queries use the rebuildable `recipe_admin_v1` projection. Public events are additive `v1`
-  lifecycle facts and contain no Ingredient narrative, supplier document, PII or health fact.
+- Merchant queries are specified to use the rebuildable `recipe_admin_v1` projection.
+  Storage and event-consumer declarations exist, but the merchant projection builder,
+  authorized query service and normal-route transport are not yet composed. The existing
+  `createPostgresRecipeQueryStore` is an internal aggregate/operation repository, not that
+  merchant projection. Public events are additive `v1` lifecycle facts and contain no
+  Ingredient narrative, supplier document, PII or health fact.
+- `createPostgresRecipeAdminQueryStore` reads one Recipe row from the active admin
+  generation, preserving checkpoint metadata and exact numeric text. It is an internal
+  repository: callers must authorize before access. It neither builds the projection nor
+  establishes freshness, permission trimming or a complete merchant editor response.
 - Quantity and conversion values use bounded integer microunits / rational factors. Cost uses exact
   integer minor units. UTC instants and IANA time zones remain explicit.
 

@@ -1,0 +1,549 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+// Batch 45 (v15 b44 live, guest-menu-wait-recheck extra finding): how the visit restore answers a
+// dine-in guest whose table's visit ended, read by read. The loaders are stubbed with the shapes
+// the pilot returned (TM2 names, "V44 A (TEST)"); the queries themselves are unchanged.
+const f = vi.hoisted(() => ({
+  resolve: vi.fn(),
+  recoverEnded: vi.fn(),
+  profile: vi.fn(),
+  merged: vi.fn(),
+  settled: vi.fn(),
+  moved: vi.fn(),
+  orders: vi.fn(),
+  mergedIn: vi.fn(),
+  writeOffs: vi.fn(),
+  onlinePayments: vi.fn(),
+  onlineRefunds: vi.fn(),
+  cashRefunds: vi.fn(),
+  cardRefunds: vi.fn(),
+  settlements: vi.fn(),
+  settlementScope: vi.fn(),
+}));
+vi.mock("@bop/identity", async (original) => ({
+  ...(await original<typeof import("@bop/identity")>()),
+  GuestSessionService: class {
+    resolve = f.resolve;
+    recoverEndedVisitCsrf = f.recoverEnded;
+  },
+  createPostgresGuestSessionEntryStore: vi.fn(),
+}));
+vi.mock("@rms/ordering", async (original) => ({
+  ...(await original<typeof import("@rms/ordering")>()),
+  listStoreDiningSessionOrders: f.orders,
+}));
+vi.mock("@rms/dining", async (original) => ({
+  ...(await original<typeof import("@rms/dining")>()),
+  listDiningSessionMergedInto: f.merged,
+  listDiningSessionsMergedIn: f.mergedIn,
+  loadDiningParticipantSettledTable: f.settled,
+  loadDiningParticipantMove: f.moved,
+}));
+vi.mock("@rms/payment", async (original) => ({
+  ...(await original<typeof import("@rms/payment")>()),
+  createPostgresDiningTableSettlementStore: (options: unknown) => {
+    f.settlementScope(options);
+    return {
+      listWriteOffsByOrders: f.writeOffs,
+      listOnlinePaymentsByOrders: f.onlinePayments,
+      listOnlineRefundsByOrders: f.onlineRefunds,
+      listCashRefundsByOrders: f.cashRefunds,
+      listCardRefundsByOrders: f.cardRefunds,
+      listByOrders: f.settlements,
+    };
+  },
+}));
+vi.mock("@rms/store", async (original) => ({
+  ...(await original<typeof import("@rms/store")>()),
+  createPublicStoreProfileService: () => ({ getPublicStore: f.profile }),
+}));
+vi.mock("./persistent-public-store-profile.js", () => ({
+  createPersistentPublicStoreProfilePorts: vi.fn(),
+}));
+import { createCustomerSessionBootstrapRead } from "./customer-session-bootstrap.js";
+const ref = (n: number) => `0190fa21-0000-7000-8000-${String(n).padStart(12, "0")}`;
+const guest = {
+  brandReference: ref(1),
+  storeReference: ref(2),
+  sessionReference: ref(3),
+  publicStoreReference: ref(4),
+  channel: "DineIn",
+  locale: "zh-Hans",
+  diningState: "DiningBound",
+  diningSessionReference: ref(5),
+  diningParticipantReference: ref(6),
+};
+const tx = { query: vi.fn() };
+const options = {
+  scope: { brandReference: ref(1), storeReference: ref(2) },
+  transactions: { run: async (work: (t: typeof tx) => Promise<unknown>) => work(tx) },
+  credentials: {},
+  binding: vi.fn(),
+  now: () => "2026-11-21T01:39:00.000Z",
+  publicProfile: {},
+} as unknown as Parameters<typeof createCustomerSessionBootstrapRead>[0];
+const tm2 = {
+  brandDisplayName: "Test Merchant 2 - not production",
+  storeDisplayName: "Test Merchant 2 Main - not production",
+};
+beforeEach(() => {
+  vi.clearAllMocks();
+  f.resolve.mockResolvedValue(guest);
+  f.recoverEnded.mockResolvedValue({ session: guest, csrfCredential: "C".repeat(43) });
+  f.profile.mockResolvedValue({ status: "Available", profile: tm2 });
+  f.merged.mockResolvedValue(new Map());
+  f.moved.mockResolvedValue(null);
+  f.settled.mockResolvedValue({ tableLabel: "V44 A (TEST)", tableReference: ref(7) });
+  f.orders.mockResolvedValue(new Map());
+  f.mergedIn.mockResolvedValue([]);
+  f.writeOffs.mockResolvedValue([]);
+  f.onlinePayments.mockResolvedValue([]);
+  f.onlineRefunds.mockResolvedValue([]);
+  f.cashRefunds.mockResolvedValue([]);
+  f.cardRefunds.mockResolvedValue([]);
+  f.settlements.mockResolvedValue([]);
+});
+
+it("a table closed with nothing ordered says so with the Store's names, and gives nothing to act with", async () => {
+  const answer = await createCustomerSessionBootstrapRead(options).readSettledTable("A".repeat(43));
+  // Before: null, so the phone heard "no visit" and asked the guest for a join code.
+  expect(answer).toEqual({ tableLabel: "V44 A (TEST)", nothingOrdered: true, store: tm2 });
+  expect(JSON.stringify(answer)).not.toContain("C".repeat(43));
+  // An unreadable profile leaves the names out, never the answer.
+  f.profile.mockResolvedValue({ status: "Unavailable" });
+  expect(
+    await createCustomerSessionBootstrapRead(options).readSettledTable("A".repeat(43)),
+  ).toEqual({ tableLabel: "V44 A (TEST)", nothingOrdered: true });
+});
+
+it("a settled table with orders keeps its receipt access (unchanged)", async () => {
+  f.orders.mockResolvedValue(new Map([[ref(5), [{ orderReference: ref(8) }]]]));
+  expect(
+    await createCustomerSessionBootstrapRead(options).readSettledTable("A".repeat(43)),
+  ).toEqual({
+    tableLabel: "V44 A (TEST)",
+    tableReference: ref(7),
+    csrfToken: "C".repeat(43),
+    store: tm2,
+  });
+});
+
+it("a party merged into a table that then closed is thanked there, with the Store's names", async () => {
+  // The merged table had ordered (its Order is on the table the party was merged into).
+  f.orders.mockResolvedValue(new Map([[ref(9), ref(8)]]));
+  f.merged.mockResolvedValue(
+    new Map([
+      [
+        ref(5),
+        { diningSessionReference: ref(9), tableLabel: "H4", fromTableLabel: "H3", phase: "Closed" },
+      ],
+    ]),
+  );
+  expect(
+    await createCustomerSessionBootstrapRead(options).readSettledTable("A".repeat(43)),
+  ).toEqual({ tableLabel: "H4", csrfToken: "C".repeat(43), store: tm2 });
+});
+
+it("a party moved or merged into an open table is told where, with the Store's names", async () => {
+  // The party had ordered (batch 46: one that hadn't is told so, below).
+  f.orders.mockResolvedValue(new Map([[ref(5), ref(8)]]));
+  f.moved.mockResolvedValue({ tableLabel: "V44 B (TEST)", fromTableLabel: "V44 A (TEST)" });
+  expect(await createCustomerSessionBootstrapRead(options).readMovedTable("A".repeat(43))).toEqual({
+    tableLabel: "V44 B (TEST)",
+    store: tm2,
+  });
+  f.merged.mockResolvedValue(
+    new Map([
+      [
+        ref(5),
+        { diningSessionReference: ref(9), tableLabel: "H4", fromTableLabel: "H3", phase: "Active" },
+      ],
+    ]),
+  );
+  expect(await createCustomerSessionBootstrapRead(options).readMovedTable("A".repeat(43))).toEqual({
+    tableLabel: "H4",
+    merged: true,
+    store: tm2,
+  });
+  f.profile.mockRejectedValue(new Error("profile read failed"));
+  expect(await createCustomerSessionBootstrapRead(options).readMovedTable("A".repeat(43))).toEqual({
+    tableLabel: "H4",
+    merged: true,
+  });
+});
+
+// Batch 46 (v15 b45 live, b-merged-then-closed-G4-390.png): a party merged into E45 A (TEST),
+// which then closed with nothing ordered by anyone, was thanked "for dining with us" with no
+// receipt. It is told what a table of its own is told: the visit ended, nothing was charged.
+it("a party merged into a table that then closed with nothing ordered is told nothing was charged", async () => {
+  f.merged.mockResolvedValue(
+    new Map([
+      [
+        ref(5),
+        {
+          diningSessionReference: ref(9),
+          tableLabel: "E45 A (TEST)",
+          fromTableLabel: "E45 C (TEST)",
+          phase: "Closed",
+        },
+      ],
+    ]),
+  );
+  f.mergedIn.mockResolvedValue([ref(5)]);
+  const answer = await createCustomerSessionBootstrapRead(options).readSettledTable("A".repeat(43));
+  expect(answer).toEqual({ tableLabel: "E45 A (TEST)", nothingOrdered: true, store: tm2 });
+  expect(JSON.stringify(answer)).not.toContain("C".repeat(43));
+  // Every party at that table was asked about: the target and the parties merged into it.
+  expect(f.mergedIn).toHaveBeenCalledWith(tx, options.scope, ref(9));
+  expect(f.orders).toHaveBeenCalledWith(tx, options.scope, [ref(9), ref(5)]);
+  // An Order of the merged-in party alone still keeps the receipt.
+  f.orders.mockResolvedValue(new Map([[ref(5), ref(8)]]));
+  expect(
+    await createCustomerSessionBootstrapRead(options).readSettledTable("A".repeat(43)),
+  ).toEqual({ tableLabel: "E45 A (TEST)", csrfToken: "C".repeat(43), store: tm2 });
+});
+
+it("a moved or merged party that ordered nothing is told so (no 'everything you ordered')", async () => {
+  f.merged.mockResolvedValue(
+    new Map([
+      [
+        ref(5),
+        {
+          diningSessionReference: ref(9),
+          tableLabel: "E45 A (TEST)",
+          fromTableLabel: "E45 C (TEST)",
+          phase: "Active",
+        },
+      ],
+    ]),
+  );
+  expect(await createCustomerSessionBootstrapRead(options).readMovedTable("A".repeat(43))).toEqual({
+    tableLabel: "E45 A (TEST)",
+    merged: true,
+    nothingOrdered: true,
+    store: tm2,
+  });
+  expect(f.orders).toHaveBeenCalledWith(tx, options.scope, [ref(5)]);
+  f.orders.mockResolvedValue(new Map([[ref(5), ref(8)]]));
+  expect(await createCustomerSessionBootstrapRead(options).readMovedTable("A".repeat(43))).toEqual({
+    tableLabel: "E45 A (TEST)",
+    merged: true,
+    store: tm2,
+  });
+  f.merged.mockResolvedValue(new Map());
+  f.moved.mockResolvedValue({ tableLabel: "E45 B (TEST)", fromTableLabel: "E45 A (TEST)" });
+  f.orders.mockResolvedValue(new Map());
+  expect(await createCustomerSessionBootstrapRead(options).readMovedTable("A".repeat(43))).toEqual({
+    tableLabel: "E45 B (TEST)",
+    nothingOrdered: true,
+    store: tm2,
+  });
+});
+
+// Batch 55 review (v15 b54, TM2 L54 GB2 (TEST), order 59): staff recorded "Guests left without
+// paying" and then closed the table. The restore gave the settled table's receipt access, so
+// Menu, dish pages and Cart said "Thank you for dining with us … See the receipt", and Your table
+// showed nothing (the settled receipt read refuses a written-off bill). The write-off record is
+// Payment's, in the shape v15 holds (priced 1413, captured 0, written off 1413).
+describe("a bill staff closed when the guests left", () => {
+  const withTenant = {
+    ...options,
+    publicProfile: { binding: { tenantReference: ref(10) } },
+  } as unknown as Parameters<typeof createCustomerSessionBootstrapRead>[0];
+  const writeOff = (captured: bigint, priced = 1413n) => ({
+    orderReference: ref(8),
+    reasonCode: "GUEST_LEFT_UNPAID",
+    pricedOrderTotalMinor: priced,
+    capturedOrderAllocationMinor: captured,
+    writtenOffMinor: priced - captured,
+  });
+  beforeEach(() => {
+    f.orders.mockResolvedValue(new Map([[ref(5), ref(8)]]));
+  });
+
+  it("nothing paid (order 59): says so, with no receipt access", async () => {
+    f.writeOffs.mockResolvedValue([writeOff(0n)]);
+    const answer = await createCustomerSessionBootstrapRead(withTenant).readSettledTable(
+      "A".repeat(43),
+    );
+    expect(answer).toEqual({ tableLabel: "V44 A (TEST)", closedByStaff: "Nothing", store: tm2 });
+    expect(JSON.stringify(answer)).not.toContain("C".repeat(43));
+    // Payment's own record of this table's Order, under the Store's tenant.
+    expect(f.writeOffs).toHaveBeenCalledWith(tx, [ref(8)]);
+    expect(f.settlementScope).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: { tenantReference: ref(10), brandReference: ref(1), storeReference: ref(2) },
+      }),
+    );
+  });
+
+  it("a dish another guest paid first (order 55, $14.13 of $28.25): what was paid, no receipt access", async () => {
+    f.writeOffs.mockResolvedValue([writeOff(1413n, 2825n)]);
+    const answer = await createCustomerSessionBootstrapRead(withTenant).readSettledTable(
+      "A".repeat(43),
+    );
+    expect(answer).toEqual({ tableLabel: "V44 A (TEST)", closedByStaff: "Some", store: tm2 });
+    expect(JSON.stringify(answer)).not.toContain("C".repeat(43));
+  });
+
+  // Batch 56 (v15 b55 live, L55 CB2/CB3 orders 76 and 80): Payment's record of the phone
+  // payments on that bill, in the shape v15 holds (part 1 of the split plan, captured 1413).
+  const phonePayment = (guestSessionReference: string, status: string) => ({
+    onlinePaymentReference: ref(20),
+    orderReference: ref(8),
+    guestSessionReference,
+    roundsMinor: 1413n,
+    tipMinor: 0n,
+    totalMinor: 1413n,
+    part: { splitPlanReference: ref(21), partNumber: 1 },
+    outcome: {
+      status,
+      capturedMinor: status === "Captured" ? 1413n : null,
+      providerTransactionReference: null,
+      occurredAt: "2026-11-24T00:34:40.000Z",
+      recordedAt: "2026-11-24T00:34:40.000Z",
+    },
+  });
+  it("batch 56: the phone that paid part of it is told what it paid, with its own receipt's access", async () => {
+    f.writeOffs.mockResolvedValue([writeOff(1413n, 2825n)]);
+    f.onlinePayments.mockResolvedValue([phonePayment(guest.sessionReference, "Captured")]);
+    const answer = await createCustomerSessionBootstrapRead(withTenant).readSettledTable(
+      "A".repeat(43),
+    );
+    // Before: { tableLabel, closedByStaff: "Some", store } — nothing said the $14.13 was theirs.
+    expect(answer).toEqual({
+      tableLabel: "V44 A (TEST)",
+      closedByStaff: "Some",
+      store: tm2,
+      yourPayment: { amountMinor: "1413", method: "Online" },
+      csrfToken: "C".repeat(43),
+    });
+    expect(f.onlinePayments).toHaveBeenCalledWith(tx, [ref(8)]);
+  });
+
+  // Batch 57 (WP-2423 Q36): staff refunded part of that phone payment to its card. Payment's
+  // refund records, in v15's shape: $5.00 Succeeded, $3.00 still on its way (no answer), $2.00
+  // the Provider refused; and $4.00 of another guest's payment. Before: amountMinor 1413 only.
+  const refund = (payment: string, amountMinor: bigint, status: "Succeeded" | "Failed" | null) => ({
+    onlineRefundReference: ref(40 + Number(amountMinor % 97n)),
+    onlinePaymentReference: payment,
+    orderReference: ref(8),
+    amountMinor,
+    requestedAt: "2026-11-24T00:40:17.521Z",
+    outcome:
+      status === null
+        ? null
+        : {
+            status,
+            providerRefundReference: null,
+            providerCreatedAt: null,
+            recordedAt: "2026-11-24T00:40:17.565Z",
+          },
+  });
+  it("batch 57: the payer is told what went back to its card; refused and other guests' refunds are not", async () => {
+    f.writeOffs.mockResolvedValue([writeOff(1413n, 2825n)]);
+    f.onlinePayments.mockResolvedValue([
+      phonePayment(guest.sessionReference, "Captured"),
+      { ...phonePayment(ref(30), "Captured"), onlinePaymentReference: ref(31) },
+    ]);
+    f.onlineRefunds.mockResolvedValue([
+      refund(ref(20), 500n, "Succeeded"),
+      refund(ref(20), 300n, null),
+      refund(ref(20), 200n, "Failed"),
+      refund(ref(31), 400n, "Succeeded"),
+    ]);
+    const answer = await createCustomerSessionBootstrapRead(withTenant).readSettledTable(
+      "A".repeat(43),
+    );
+    // Batch 60 (v15 b59 live): of it, the $3.00 the Provider has not answered is on its way, so
+    // the ended page says only what Payment confirmed went back. Batch 61: part of what stays
+    // paid went back, so the ended page never says it stays paid.
+    expect(answer).toEqual({
+      tableLabel: "V44 A (TEST)",
+      closedByStaff: "Some",
+      someRefunded: true,
+      store: tm2,
+      yourPayment: {
+        amountMinor: "1413",
+        method: "Online",
+        refundedMinor: "800",
+        refundPendingMinor: "300",
+      },
+      csrfToken: "C".repeat(43),
+    });
+    expect(f.onlineRefunds).toHaveBeenCalledWith(tx, [ref(8)]);
+    // Only refused refunds: nothing went back, nothing is said.
+    f.onlineRefunds.mockResolvedValue([refund(ref(20), 200n, "Failed")]);
+    expect(
+      await createCustomerSessionBootstrapRead(withTenant).readSettledTable("A".repeat(43)),
+    ).toMatchObject({ yourPayment: { amountMinor: "1413", method: "Online" } });
+    expect(
+      JSON.stringify(
+        await createCustomerSessionBootstrapRead(withTenant).readSettledTable("A".repeat(43)),
+      ),
+    ).not.toContain("refundedMinor");
+  });
+
+  // Batch 59 (v15 b58 live, TM2 L58R B order 23): even split in 2, phone A paid part 1 (1413),
+  // staff wrote off the rest (1412), then a manager refunded all 1413 to the card (Succeeded).
+  // Once cleaned, both phones' ended page said "what was paid stays paid". Payment's refunds of
+  // the table's payments, as the guest table read sums them, tell the restore all of it went back.
+  it("batch 59: all that was paid went back: 'Refunded' on every phone; part of it: still 'Some'", async () => {
+    f.writeOffs.mockResolvedValue([writeOff(1413n, 2825n)]);
+    f.onlinePayments.mockResolvedValue([phonePayment(guest.sessionReference, "Captured")]);
+    f.onlineRefunds.mockResolvedValue([refund(ref(20), 1413n, "Succeeded")]);
+    const read = () =>
+      createCustomerSessionBootstrapRead(withTenant).readSettledTable("A".repeat(43));
+    expect(await read()).toEqual({
+      tableLabel: "V44 A (TEST)",
+      closedByStaff: "Refunded",
+      store: tm2,
+      yourPayment: { amountMinor: "1413", method: "Online", refundedMinor: "1413" },
+      csrfToken: "C".repeat(43),
+    });
+    // Another guest's phone: the same table fact, never whose payment or how much went back.
+    f.onlinePayments.mockResolvedValue([
+      { ...phonePayment(ref(30), "Captured"), onlinePaymentReference: ref(20) },
+    ]);
+    const other = await read();
+    expect(other).toEqual({ tableLabel: "V44 A (TEST)", closedByStaff: "Refunded", store: tm2 });
+    expect(JSON.stringify(other)).not.toMatch(/1413|refunded/u);
+    // On its way counts; refused does not; cash given back and card-machine refunds count too.
+    f.onlineRefunds.mockResolvedValue([refund(ref(20), 1413n, null)]);
+    expect(await read()).toMatchObject({ closedByStaff: "Refunded" });
+    f.onlineRefunds.mockResolvedValue([refund(ref(20), 1413n, "Failed")]);
+    expect(await read()).toMatchObject({ closedByStaff: "Some" });
+    f.onlineRefunds.mockResolvedValue([]);
+    f.cashRefunds.mockResolvedValue([{ amountMinor: 1000n }]);
+    f.cardRefunds.mockResolvedValue([{ amountMinor: 413n }]);
+    expect(await read()).toMatchObject({ closedByStaff: "Refunded" });
+    // L58R A (order 16): $8.00 of $14.13 back: what stays paid stays paid.
+    f.cashRefunds.mockResolvedValue([]);
+    f.cardRefunds.mockResolvedValue([]);
+    f.onlineRefunds.mockResolvedValue([refund(ref(20), 800n, "Succeeded")]);
+    expect(await read()).toMatchObject({ closedByStaff: "Some" });
+    expect(f.cashRefunds).toHaveBeenCalledWith(tx, [ref(8)]);
+    expect(f.cardRefunds).toHaveBeenCalledWith(tx, [ref(8)]);
+  });
+
+  // Batch 59 review: phone A paid part 1 as $14.13 plus a $2.00 tip (Payment's settlement total
+  // 1613; the write-off's captured order money 1413 leaves the tip out), staff closed the rest,
+  // then a manager refunded $14.13 (or $15.00). $2.00 (or $1.13) stays paid: "Some", as the live
+  // closed page counts it by settlement total. Before: "Refunded" on both phones.
+  it("batch 59 review: a tip still paid after the order money went back is 'Some'; all of it back: 'Refunded'", async () => {
+    f.writeOffs.mockResolvedValue([writeOff(1413n, 2825n)]);
+    f.settlements.mockResolvedValue([
+      { orderReference: ref(8), tipMinor: 200n, totalMinor: 1613n },
+    ]);
+    f.onlinePayments.mockResolvedValue([
+      { ...phonePayment(guest.sessionReference, "Captured"), tipMinor: 200n, totalMinor: 1613n },
+    ]);
+    const read = () =>
+      createCustomerSessionBootstrapRead(withTenant).readSettledTable("A".repeat(43));
+    f.onlineRefunds.mockResolvedValue([refund(ref(20), 1413n, "Succeeded")]);
+    expect(await read()).toMatchObject({ closedByStaff: "Some" });
+    f.onlineRefunds.mockResolvedValue([refund(ref(20), 1500n, "Succeeded")]);
+    expect(await read()).toMatchObject({ closedByStaff: "Some" });
+    f.onlineRefunds.mockResolvedValue([
+      refund(ref(20), 1413n, "Succeeded"),
+      refund(ref(20), 200n, null),
+    ]);
+    expect(await read()).toMatchObject({ closedByStaff: "Refunded" });
+    expect(f.settlements).toHaveBeenCalledWith(tx, [ref(8)]);
+  });
+
+  // Batch 61 (v15 b60 live, CRT60 D order 51): by dish, A paid $14.13 and B $14.12 (part 1 and
+  // part 2 of the plan), staff closed the rest (round 2), then a manager refunded $8.00 of A
+  // (Succeeded/800). Once cleaned, both phones' ended page said "what was paid stays paid" next
+  // to A's "$8.00 went back to your card". Before: no someRefunded on either phone.
+  it("batch 61: part of what stays paid went back: someRefunded on every phone, the amount payer-only", async () => {
+    f.writeOffs.mockResolvedValue([writeOff(2825n, 4237n)]);
+    f.settlements.mockResolvedValue([
+      { orderReference: ref(8), tipMinor: 0n, totalMinor: 1413n },
+      { orderReference: ref(8), tipMinor: 0n, totalMinor: 1412n },
+    ]);
+    const partB = {
+      ...phonePayment(ref(30), "Captured"),
+      onlinePaymentReference: ref(31),
+      roundsMinor: 1412n,
+      totalMinor: 1412n,
+      part: { splitPlanReference: ref(21), partNumber: 2 },
+      outcome: { ...phonePayment(ref(30), "Captured").outcome, capturedMinor: 1412n },
+    };
+    f.onlinePayments.mockResolvedValue([phonePayment(guest.sessionReference, "Captured"), partB]);
+    f.onlineRefunds.mockResolvedValue([refund(ref(20), 800n, "Succeeded")]);
+    const read = () =>
+      createCustomerSessionBootstrapRead(withTenant).readSettledTable("A".repeat(43));
+    expect(await read()).toEqual({
+      tableLabel: "V44 A (TEST)",
+      closedByStaff: "Some",
+      someRefunded: true,
+      store: tm2,
+      yourPayment: { amountMinor: "1413", method: "Online", refundedMinor: "800" },
+      csrfToken: "C".repeat(43),
+    });
+    f.onlinePayments.mockResolvedValue([
+      { ...phonePayment(ref(32), "Captured"), onlinePaymentReference: ref(20) },
+      { ...partB, guestSessionReference: guest.sessionReference },
+    ]);
+    const other = await read();
+    expect(other).toEqual({
+      tableLabel: "V44 A (TEST)",
+      closedByStaff: "Some",
+      someRefunded: true,
+      store: tm2,
+      yourPayment: { amountMinor: "1412", method: "Online" },
+      csrfToken: "C".repeat(43),
+    });
+    expect(JSON.stringify(other)).not.toMatch(/800|1413|refundedMinor/u);
+    // Nothing given back (or only a refused refund): no flag, the old words stand.
+    f.onlineRefunds.mockResolvedValue([refund(ref(20), 800n, "Failed")]);
+    expect(await read()).not.toHaveProperty("someRefunded");
+    f.onlineRefunds.mockResolvedValue([]);
+    expect(await read()).not.toHaveProperty("someRefunded");
+  });
+
+  it("batch 56: another guest's payment, or a declined one, is never this phone's", async () => {
+    f.writeOffs.mockResolvedValue([writeOff(1413n, 2825n)]);
+    f.onlinePayments.mockResolvedValue([
+      phonePayment(ref(30), "Captured"),
+      phonePayment(guest.sessionReference, "Failed"),
+    ]);
+    const answer = await createCustomerSessionBootstrapRead(withTenant).readSettledTable(
+      "A".repeat(43),
+    );
+    expect(answer).toEqual({ tableLabel: "V44 A (TEST)", closedByStaff: "Some", store: tm2 });
+    expect(JSON.stringify(answer)).not.toContain("C".repeat(43));
+  });
+
+  it("a party merged into a table whose bill staff closed is told the same", async () => {
+    f.merged.mockResolvedValue(
+      new Map([
+        [
+          ref(5),
+          {
+            diningSessionReference: ref(9),
+            tableLabel: "H4",
+            fromTableLabel: "H3",
+            phase: "Closed",
+          },
+        ],
+      ]),
+    );
+    f.orders.mockResolvedValue(new Map([[ref(9), ref(8)]]));
+    f.writeOffs.mockResolvedValue([writeOff(0n)]);
+    expect(
+      await createCustomerSessionBootstrapRead(withTenant).readSettledTable("A".repeat(43)),
+    ).toEqual({ tableLabel: "H4", closedByStaff: "Nothing", store: tm2 });
+  });
+
+  it("a settled bill (no write-off) keeps its receipt access", async () => {
+    expect(
+      await createCustomerSessionBootstrapRead(withTenant).readSettledTable("A".repeat(43)),
+    ).toEqual({
+      tableLabel: "V44 A (TEST)",
+      tableReference: ref(7),
+      csrfToken: "C".repeat(43),
+      store: tm2,
+    });
+  });
+});

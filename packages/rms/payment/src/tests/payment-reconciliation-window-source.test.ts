@@ -1,0 +1,362 @@
+import { expect, it, vi } from "vitest";
+import type { ConsumerTransaction } from "@bop/eventing";
+import { createPostgresPaymentReconciliationDaySource } from "../infrastructure/persistence/payment-reconciliation-window-source.js";
+const id = (n: number) => "0198a107-0000-7000-8000-" + String(n).padStart(12, "0");
+const startsAt = "2026-09-21T08:00:00.000Z",
+  endsAt = "2026-09-22T08:00:00.000Z";
+function setup() {
+  const operationalRun: Record<string, unknown> = {
+    run_reference: id(1),
+    mode: "Operational",
+    scheduled_at: new Date("2026-09-22T07:58:00.000Z"),
+    cutoff_at: new Date("2026-09-22T07:58:00.000Z"),
+    completed_at: new Date("2026-09-22T07:58:01.000Z"),
+    matched_count: 12,
+    healed_count: 1,
+    unresolved_count: 1,
+    unavailable_count: 0,
+    difference_count: 0,
+  };
+  const settlementRun: Record<string, unknown> = {
+    ...operationalRun,
+    run_reference: id(5),
+    mode: "DailySettlement",
+    scheduled_at: new Date("2026-09-22T12:00:00.000Z"),
+    cutoff_at: new Date("2026-09-22T12:00:00.000Z"),
+    completed_at: new Date("2026-09-22T12:00:01.000Z"),
+    matched_count: 1,
+    healed_count: 0,
+    unresolved_count: 0,
+    difference_count: 0,
+  };
+  const unresolved: Record<string, unknown> = {
+    check_reference: id(4),
+    run_reference: id(1),
+    checked_at: new Date("2026-09-22T07:58:00.500Z"),
+    outcome: "Unresolved",
+    difference_reason: null,
+    settlement_reference: null,
+    internal_status: "RequiresCustomerAction",
+    provider_status: "RequiresCustomerAction",
+    currency_code: "CAD",
+    internal_captured_minor: "0",
+    provider_captured_minor: "0",
+    internal_refunded_minor: "0",
+    provider_refunded_minor: "0",
+    exception_reference: null,
+  };
+  const statement: Record<string, unknown> = {
+    ...unresolved,
+    check_reference: id(6),
+    run_reference: id(5),
+    checked_at: new Date("2026-09-22T12:00:00.500Z"),
+    outcome: "Matched",
+    settlement_reference: "SETTLE-2026-09-21",
+    internal_status: null,
+    provider_status: null,
+    internal_captured_minor: "123450",
+    provider_captured_minor: "123450",
+    internal_refunded_minor: "1130",
+    provider_refunded_minor: "1130",
+  };
+  const rows = {
+    runCount: 240,
+    latest: [operationalRun],
+    outcomes: [
+      { outcome: "Matched", payments: 13 },
+      { outcome: "Unresolved", payments: 1 },
+    ],
+    differences: [unresolved],
+    settlementRuns: [settlementRun],
+    settlementChecks: [statement],
+    candidates: [{ candidate_reference: id(7) }] as Record<string, unknown>[],
+    rechecks: [] as Record<string, unknown>[],
+    recheckRuns: [] as Record<string, unknown>[],
+  };
+  const query = vi.fn(async (sql: string) => ({
+    rows: sql.includes("AS candidate_reference")
+      ? rows.candidates
+      : sql.includes("r.candidate_id=$3")
+        ? rows.rechecks
+        : sql.includes("FROM rms_payment.payment_reconciliation_run") &&
+            sql.includes("mode='DailySettlement'") &&
+            !sql.includes("scheduled_at>=")
+          ? rows.recheckRuns
+          : sql.includes("count(*)::int AS run_count")
+            ? [{ run_count: rows.runCount }]
+            : sql.includes("count(*)::int AS payments")
+              ? rows.outcomes
+              : sql.includes("WITH latest AS")
+                ? rows.differences
+                : sql.includes("mode='DailySettlement'")
+                  ? rows.settlementRuns
+                  : sql.includes("FROM rms_payment.payment_reconciliation_record r")
+                    ? rows.settlementChecks
+                    : sql.includes("FROM rms_payment.payment_reconciliation_run")
+                      ? rows.latest
+                      : [],
+    rowCount: 0,
+  }));
+  const tx = { query } as unknown as ConsumerTransaction;
+  const authorize = vi.fn<(tx: ConsumerTransaction, input: unknown) => Promise<boolean>>(
+    async () => true,
+  );
+  return {
+    rows,
+    query,
+    tx,
+    authorize,
+    read: createPostgresPaymentReconciliationDaySource({
+      scope: { brandReference: id(2), storeReference: id(3) },
+      authorize,
+    }),
+  };
+}
+it("summarises the day's runs, counts each payment once and reads the day's settlement run", async () => {
+  const f = setup();
+  const result = await f.read(f.tx, { startsAt, endsAt, settlementRunReference: id(5) });
+  expect(result.operational).toEqual({
+    runCount: 240,
+    latestRun: expect.objectContaining({ runReference: id(1), mode: "Operational" }),
+    paymentCount: 14,
+    outcomes: { Matched: 13, Healed: 0, Unresolved: 1, Unavailable: 0, Difference: 0 },
+  });
+  expect(result.differenceCount).toBe(1);
+  expect(result.differences[0]).toMatchObject({
+    outcome: "Unresolved",
+    internalStatus: "RequiresCustomerAction",
+    exceptionReference: null,
+  });
+  expect(result.settlement?.run.runReference).toBe(id(5));
+  expect(result.settlement?.checks[0]).toMatchObject({
+    outcome: "Matched",
+    settlementReference: "SETTLE-2026-09-21",
+    providerRefundedMinor: "1130",
+  });
+  expect(f.authorize).toHaveBeenCalledTimes(2);
+  expect(f.authorize.mock.calls[0]?.[1]).toMatchObject({
+    purpose: "ReadPaymentReconciliationDay",
+    startsAt,
+    endsAt,
+  });
+  for (const [sql, params] of f.query.mock.calls as unknown as [string, unknown[]][])
+    if (sql.includes("FROM rms_payment")) {
+      expect(sql).toContain("brand_id=$1");
+      expect(sql).toContain("store_id=$2");
+      expect(params.slice(0, 2)).toEqual([id(2), id(3)]);
+    }
+  const settlementRun = (f.query.mock.calls as unknown as [string, unknown[]][]).find(([sql]) =>
+    sql.includes("mode='DailySettlement'"),
+  );
+  expect(settlementRun?.[1]).toEqual([id(2), id(3), id(5), endsAt]);
+});
+it("reads an empty day without a settlement and still re-authorizes", async () => {
+  const f = setup();
+  f.rows.runCount = 0;
+  f.rows.latest = [];
+  f.rows.outcomes = [];
+  f.rows.settlementRuns = [];
+  const result = await f.read(f.tx, { startsAt, endsAt, settlementRunReference: null });
+  expect(result).toMatchObject({
+    settlement: null,
+    operational: {
+      runCount: 0,
+      latestRun: null,
+      paymentCount: 0,
+      outcomes: { Matched: 0, Healed: 0, Unresolved: 0, Unavailable: 0, Difference: 0 },
+    },
+    differences: [],
+    differenceCount: 0,
+  });
+  // set_config, run count, latest run, per-payment outcomes; no differences or settlement query.
+  expect(f.query).toHaveBeenCalledTimes(4);
+  expect(f.authorize).toHaveBeenCalledTimes(2);
+});
+it("reports a day whose settlement run has not happened yet", async () => {
+  const f = setup();
+  f.rows.settlementRuns = [];
+  const result = await f.read(f.tx, { startsAt, endsAt, settlementRunReference: id(5) });
+  expect(result.settlement).toBeNull();
+  expect(result.operational.runCount).toBe(240);
+});
+it("refuses a denied scope, an inverted window and corrupt rows", async () => {
+  const denied = setup();
+  denied.authorize.mockResolvedValue(false);
+  await expect(
+    denied.read(denied.tx, { startsAt, endsAt, settlementRunReference: null }),
+  ).rejects.toMatchObject({ code: "PAYMENT_RECONCILIATION_PERMISSION_DENIED" });
+  const inverted = setup();
+  await expect(
+    inverted.read(inverted.tx, {
+      startsAt: endsAt,
+      endsAt: startsAt,
+      settlementRunReference: null,
+    }),
+  ).rejects.toThrow();
+  for (const corrupt of [
+    { outcome: "Matched" },
+    { currency_code: "USD" },
+    { internal_captured_minor: 0 },
+  ]) {
+    const f = setup();
+    Object.assign(f.rows.differences[0] as object, corrupt);
+    await expect(
+      f.read(f.tx, { startsAt, endsAt, settlementRunReference: null }),
+    ).rejects.toMatchObject({ code: "PAYMENT_RECONCILIATION_DEPENDENCY_UNAVAILABLE" });
+  }
+  const foreign = setup();
+  Object.assign(foreign.rows.settlementChecks[0] as object, { run_reference: id(9) });
+  await expect(
+    foreign.read(foreign.tx, { startsAt, endsAt, settlementRunReference: id(5) }),
+  ).rejects.toMatchObject({ code: "PAYMENT_RECONCILIATION_DEPENDENCY_UNAVAILABLE" });
+  const empty = setup();
+  empty.rows.settlementChecks = [];
+  await expect(
+    empty.read(empty.tx, { startsAt, endsAt, settlementRunReference: id(5) }),
+  ).rejects.toMatchObject({ code: "PAYMENT_RECONCILIATION_DEPENDENCY_UNAVAILABLE" });
+});
+
+it("WP-2423: reads the day's latest re-check as its current result beside the first check", async () => {
+  const f = setup();
+  f.rows.settlementChecks = [
+    {
+      ...f.rows.settlementChecks[0],
+      outcome: "Difference",
+      difference_reason: "RefundMismatch",
+      internal_refunded_minor: "0",
+      provider_refunded_minor: "2260",
+      exception_reference: id(9),
+    },
+  ];
+  f.rows.rechecks = [
+    {
+      ...f.rows.settlementChecks[0],
+      check_reference: id(11),
+      run_reference: id(10),
+      checked_at: new Date("2026-10-15T12:00:00.500Z"),
+      outcome: "Matched",
+      difference_reason: null,
+      internal_refunded_minor: "2260",
+      provider_refunded_minor: "2260",
+      exception_reference: null,
+    },
+  ];
+  f.rows.recheckRuns = [
+    {
+      ...f.rows.settlementRuns[0],
+      run_reference: id(10),
+      scheduled_at: new Date("2026-10-15T12:00:00.000Z"),
+      cutoff_at: new Date("2026-10-15T12:00:00.000Z"),
+      completed_at: new Date("2026-10-15T12:00:01.000Z"),
+    },
+  ];
+  const result = await f.read(f.tx, {
+    startsAt,
+    endsAt,
+    settlementRunReference: id(5),
+    recheckRunReferences: [id(10), id(12)],
+  });
+  expect(result.settlement?.checks[0]).toMatchObject({ outcome: "Difference" });
+  expect(result.settlement?.recheck).toMatchObject({
+    run: { runReference: id(10), mode: "DailySettlement" },
+    check: { outcome: "Matched", internalRefundedMinor: "2260", providerRefundedMinor: "2260" },
+    count: 1,
+  });
+  expect(result.settlement?.additionalChecks).toEqual([]);
+  const later = (f.query.mock.calls as unknown as [string, unknown[]][]).find(([sql]) =>
+    sql.includes("r.candidate_id=$3"),
+  );
+  expect(later?.[1]).toEqual([id(2), id(3), id(7), id(5), endsAt, 2 + 5 + 1]);
+});
+it("WP-2423: a duplicate original settlement of the day is history, never its re-check (Sep 20)", async () => {
+  // v15 Sep 20: an earlier settlement run outside the day's schedule (checked 04:55) and the
+  // scheduled run (05:33); the earlier one must not be read as a later check.
+  const f = setup();
+  f.rows.rechecks = [
+    {
+      ...f.rows.settlementChecks[0],
+      check_reference: id(21),
+      run_reference: id(20),
+      checked_at: new Date("2026-09-22T11:00:00.500Z"),
+    },
+  ];
+  const result = await f.read(f.tx, {
+    startsAt,
+    endsAt,
+    settlementRunReference: id(5),
+    recheckRunReferences: [id(10)],
+  });
+  expect(result.settlement?.checks[0]).toMatchObject({ outcome: "Matched", runReference: id(5) });
+  expect(result.settlement?.recheck).toBeNull();
+  expect(result.settlement?.additionalChecks).toEqual([
+    expect.objectContaining({ runReference: id(20), outcome: "Matched" }),
+  ]);
+  // A later run that is not one of the day's re-check references stays history too.
+  const later = setup();
+  later.rows.rechecks = [
+    {
+      ...later.rows.settlementChecks[0],
+      check_reference: id(21),
+      run_reference: id(20),
+      checked_at: new Date("2026-10-15T12:00:00.500Z"),
+      outcome: "Difference",
+      difference_reason: "AmountMismatch",
+    },
+  ];
+  const kept = await later.read(later.tx, {
+    startsAt,
+    endsAt,
+    settlementRunReference: id(5),
+    recheckRunReferences: [id(10)],
+  });
+  expect(kept.settlement?.recheck).toBeNull();
+  expect(kept.settlement?.checks[0]?.outcome).toBe("Matched");
+  expect(kept.settlement?.additionalChecks[0]).toMatchObject({ outcome: "Difference" });
+});
+it("WP-2423: re-checks count in their scheduled order and refuse an earlier re-check", async () => {
+  const f = setup();
+  const check = (n: number, run: number, at: string) => ({
+    ...f.rows.settlementChecks[0],
+    check_reference: id(n),
+    run_reference: id(run),
+    checked_at: new Date(at),
+  });
+  f.rows.rechecks = [
+    check(11, 10, "2026-10-15T12:00:00.500Z"),
+    check(13, 12, "2026-10-16T12:00:00.500Z"),
+  ];
+  f.rows.recheckRuns = [{ ...f.rows.settlementRuns[0], run_reference: id(12) }];
+  const result = await f.read(f.tx, {
+    startsAt,
+    endsAt,
+    settlementRunReference: id(5),
+    recheckRunReferences: [id(10), id(12), id(14)],
+  });
+  expect(result.settlement?.recheck).toMatchObject({ check: { runReference: id(12) }, count: 2 });
+  const swapped = setup();
+  swapped.rows.rechecks = [
+    check(11, 10, "2026-10-16T12:00:00.500Z"),
+    check(13, 12, "2026-10-15T12:00:00.500Z"),
+  ];
+  await expect(
+    swapped.read(swapped.tx, {
+      startsAt,
+      endsAt,
+      settlementRunReference: id(5),
+      recheckRunReferences: [id(10), id(12)],
+    }),
+  ).rejects.toMatchObject({ code: "PAYMENT_RECONCILIATION_DEPENDENCY_UNAVAILABLE" });
+  await expect(
+    f.read(f.tx, {
+      startsAt,
+      endsAt,
+      settlementRunReference: id(5),
+      recheckRunReferences: [id(5)],
+    }),
+  ).rejects.toThrow();
+});
+it("WP-2423: a day checked once has no re-check", async () => {
+  const f = setup();
+  const result = await f.read(f.tx, { startsAt, endsAt, settlementRunReference: id(5) });
+  expect(result.settlement?.recheck).toBeNull();
+});

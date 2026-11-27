@@ -35,6 +35,13 @@ for (const forbidden of [
 for (const forbidden of ["orderReference", "pickupCode", "paymentIntent", "accessToken"]) {
   if (offline.includes(forbidden)) throw new Error(`Offline fallback contains ${forbidden}`);
 }
+// WP-2423: guest words only (offline or a planned update), with a way to try again.
+const offlineText = offline.replace(/<!--[\s\S]*?-->/gu, "").replace(/<[^>]*>/gu, " ");
+for (const forbidden of ["fallback", "business data", "BOP", "WP-"]) {
+  if (offlineText.includes(forbidden)) throw new Error(`Offline fallback says ${forbidden}`);
+}
+if (!offline.includes('<a href="">Try again</a>'))
+  throw new Error("Offline fallback has no way to try again");
 
 async function listFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });

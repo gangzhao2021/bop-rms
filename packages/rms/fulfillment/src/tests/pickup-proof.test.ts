@@ -1,3 +1,5 @@
+import { foldPickupProofHistory } from "../application/pickup-proof-history.js";
+import { parseFulfillmentReadinessSource } from "../contracts/fulfillment-readiness.js";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -6,6 +8,13 @@ import {
   planPickupProofIssue,
   validatePickupProof,
 } from "../contracts/pickup-proof.js";
+
+import {
+  encodePickupProofIssueRecord,
+  decodePickupProofIssueRecord,
+  encodePickupProofVerificationRecord,
+  decodePickupProofVerificationRecord,
+} from "../application/pickup-proof-record.js";
 
 const ids = {
   fulfillment: "018f1000-0000-7000-8000-000000000001",
@@ -274,5 +283,225 @@ describe("WP-1602 Pickup Proof", () => {
       () => planPickupProofIssue(issueInput({ idempotencyReference: ids.operation })),
       "PICKUP_PROOF_INPUT_INVALID",
     );
+  });
+});
+
+describe("WP-2402 immutable pickup proof records", () => {
+  it("recovers issue and regeneration with exact bigint versions", () => {
+    const issue = planPickupProofIssue(issueInput());
+    const regenerate = planPickupProofIssue({
+      ...issueInput(),
+      source: source({ generation: 1, capabilityReference: ids.first }),
+      previous: capability(),
+      candidate: capability({
+        reference: ids.second,
+        generation: 2,
+        selector: secondSelector,
+        capabilityReadyAt: "2026-08-11T12:10:00.000Z",
+      }),
+      expectedAggregateVersion: 4n,
+      observedAt: "2026-08-11T12:10:00.000Z",
+      invalidationReference: ids.invalidation,
+    });
+    for (const effect of [issue, regenerate]) {
+      const recovered = decodePickupProofIssueRecord(encodePickupProofIssueRecord(effect));
+      expect(recovered).toEqual(effect);
+      expect(Object.isFrozen(recovered.operation)).toBe(true);
+    }
+    const record = JSON.parse(encodePickupProofIssueRecord(regenerate));
+    for (const change of [
+      { priorGeneration: 2 },
+      { replacementCapabilityReference: ids.first },
+      { invalidatedAt: readyAt },
+      { fulfillmentReference: ids.item },
+    ]) {
+      expect(() =>
+        decodePickupProofIssueRecord(
+          JSON.stringify({
+            ...record,
+            effect: {
+              ...record.effect,
+              invalidation: { ...record.effect.invalidation, ...change },
+            },
+          }),
+        ),
+      ).toThrow(PickupProofError);
+    }
+  });
+
+  it("rejects tampered scope, operation, lifetime and raw credential fields", () => {
+    const record = JSON.parse(encodePickupProofIssueRecord(planPickupProofIssue(issueInput())));
+    for (const change of [
+      { storeReference: ids.brand },
+      { generation: 2 },
+      { capabilityReference: ids.second },
+      { occurredAt: readyAt },
+      { operationKind: "Regenerate" },
+      { aggregateVersionAfter: "5" },
+      { operationReference: ids.first },
+    ]) {
+      expect(() =>
+        decodePickupProofIssueRecord(
+          JSON.stringify({
+            ...record,
+            effect: { ...record.effect, operation: { ...record.effect.operation, ...change } },
+          }),
+        ),
+      ).toThrow(PickupProofError);
+    }
+    for (const change of [
+      { rawProof: "synthetic-forbidden-value" },
+      { issuedAt: "2026-08-11T13:00:00.000Z" },
+      { issuedAt: "2026-08-11T11:59:00.000Z" },
+      { selectorHash: "invalid" },
+    ]) {
+      expect(() =>
+        decodePickupProofIssueRecord(
+          JSON.stringify({
+            ...record,
+            effect: { ...record.effect, generation: { ...record.effect.generation, ...change } },
+          }),
+        ),
+      ).toThrow(PickupProofError);
+    }
+  });
+
+  it("rejects lossy or oversized versions and unsupported record envelopes", () => {
+    const record = JSON.parse(encodePickupProofIssueRecord(planPickupProofIssue(issueInput())));
+    for (const key of ["aggregateVersionBefore", "aggregateVersionAfter"]) {
+      for (const version of [3, "03", "0", "-1", "3e0", "9223372036854775808", null]) {
+        expect(() =>
+          decodePickupProofIssueRecord(
+            JSON.stringify({
+              ...record,
+              effect: {
+                ...record.effect,
+                operation: { ...record.effect.operation, [key]: version },
+              },
+            }),
+          ),
+        ).toThrow(PickupProofError);
+      }
+    }
+    for (const value of [
+      null,
+      "invalid",
+      "{}",
+      JSON.stringify({ ...record, recordVersion: 2 }),
+      JSON.stringify({ ...record, extra: true }),
+    ]) {
+      expect(() => decodePickupProofIssueRecord(value)).toThrow(PickupProofError);
+    }
+  });
+
+  it("preserves verification without granting completion or retaining the selector", () => {
+    const verification = validatePickupProof({
+      source: source({ generation: 1, capabilityReference: ids.first }),
+      capability: capability(),
+      selectorHash: firstSelector,
+      generation: 1,
+      expectedCapabilityVersion: 1,
+      observedAt: "2026-08-11T12:20:00.000Z",
+      verificationReference: ids.verification,
+      operationReference: ids.verifyOperation,
+      idempotencyReference: ids.verifyIdempotency,
+      correlationReference: ids.verifyCorrelation,
+    });
+    const encoded = encodePickupProofVerificationRecord(verification);
+    expect(decodePickupProofVerificationRecord(encoded)).toEqual(verification);
+    expect(encoded).not.toContain(firstSelector);
+    for (const change of [
+      { grantsCompletionAuthority: true },
+      { validationStatus: "Allowed" },
+      { selectorHash: firstSelector },
+      { generation: 0 },
+      { verificationMethod: "Bypass" },
+      { verificationReference: ids.first },
+      { operationReference: ids.verifyIdempotency },
+    ]) {
+      expect(() =>
+        decodePickupProofVerificationRecord(
+          JSON.stringify({
+            recordVersion: 1,
+            effect: { ...verification, ...change },
+          }),
+        ),
+      ).toThrow(PickupProofError);
+    }
+  });
+});
+
+describe("WP-2402 current proof history", () => {
+  const readiness = () =>
+    parseFulfillmentReadinessSource({
+      fulfillmentReference: ids.fulfillment,
+      brandReference: ids.brand,
+      storeReference: ids.store,
+      orderReference: ids.operation,
+      orderBatchReference: ids.correlation,
+      canonicalPhase: "Ready",
+      aggregateVersion: 3n,
+      lockedAt: "2026-08-11T12:30:00.000Z",
+      items: [{ ...item, orderItemReference: ids.idempotency }],
+    });
+  it("folds issue versions while keeping the original all-ready lifetime", () => {
+    const first = planPickupProofIssue(issueInput());
+    const second = planPickupProofIssue({
+      ...issueInput(),
+      source: source({ generation: 1, capabilityReference: ids.first }),
+      previous: capability(),
+      candidate: capability({
+        reference: ids.second,
+        generation: 2,
+        selector: secondSelector,
+        capabilityReadyAt: "2026-08-11T12:10:00.000Z",
+      }),
+      expectedAggregateVersion: 4n,
+      observedAt: "2026-08-11T12:10:00.000Z",
+      invalidationReference: ids.invalidation,
+    });
+    const result = foldPickupProofHistory(readiness(), readyAt, {
+      issues: [first, second],
+      verifications: [],
+    });
+    expect(result.source.aggregateVersion).toBe(5n);
+    expect(result.source.readyAt).toBe(readyAt);
+    expect(result.source.currentProofCapabilityReference).toBe(ids.second);
+    expect(result.lastIssuedAt).toBe("2026-08-11T12:10:00.000Z");
+    for (const issues of [[second], [first, first], [second, first]]) {
+      expect(() =>
+        foldPickupProofHistory(readiness(), readyAt, { issues, verifications: [] }),
+      ).toThrow(PickupProofError);
+    }
+  });
+  it("rejects history inconsistent with actual Ready instant, scope or observation time", () => {
+    const first = planPickupProofIssue(issueInput());
+    const history = { issues: [first], verifications: [] };
+    expect(() => foldPickupProofHistory(readiness(), "2026-08-11T12:02:00.000Z", history)).toThrow(
+      PickupProofError,
+    );
+    expect(() =>
+      foldPickupProofHistory(
+        parseFulfillmentReadinessSource({
+          ...readiness(),
+          lockedAt: "2026-08-11T11:59:00.000Z",
+        }),
+        readyAt,
+        history,
+      ),
+    ).toThrow(PickupProofError);
+    expect(() =>
+      foldPickupProofHistory(
+        {
+          ...readiness(),
+          storeReference: parseFulfillmentReadinessSource({
+            ...readiness(),
+            storeReference: ids.brand,
+          }).storeReference,
+        },
+        readyAt,
+        history,
+      ),
+    ).toThrow(PickupProofError);
   });
 });

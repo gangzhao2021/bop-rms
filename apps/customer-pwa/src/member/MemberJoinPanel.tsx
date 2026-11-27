@@ -1,0 +1,294 @@
+import { useEffect, useState } from "react";
+import { Link } from "react-router";
+import { t, useLanguage, wordGap } from "../i18n/i18n.js";
+import { memberCodeProblem, MemberSignIn } from "./MemberSignIn.js";
+import { memberClient, type MemberClient, type MemberState } from "./member-client.js";
+
+/**
+ * WP-2423 M58 (Owner #13): where points are earned and where they can be used. Every order placed by
+ * scanning earns; points are used only on a table's bill paid at the end.
+ */
+export const scanToOrderOnlyText = () =>
+  t(
+    "You earn points on every order you scan to place. Points can be used only when you pay a table’s bill at the end, not on pickup or pay-first tables.",
+  );
+
+type ClaimPart = NonNullable<MemberState["claim"]>["parts"][number];
+/**
+ * Batch 63 (design review D62B-08, F06): which parts this phone may claim, and whether it must be
+ * asked. A phone that paid parts on its own card claims every one of them at once ("Join and earn
+ * 375 points on what you paid"), never "Which part did you pay?" with half the points; a phone
+ * that paid nothing here is asked which part, among those paid at the counter.
+ */
+export function memberClaimParts(parts: readonly ClaimPart[]): {
+  readonly parts: readonly ClaimPart[];
+  /** Every part offered is this phone's own payment: all of them are claimed together. */
+  readonly allOwn: boolean;
+} {
+  const own = parts.filter((entry) => entry.certain === true);
+  return own.length > 0 ? { parts: own, allOwn: true } : { parts, allOwn: false };
+}
+
+/**
+ * On a receipt: join and earn on this order. Nothing here can get in the way of the receipt: a read
+ * that fails shows nothing, and joining can wait until the time it states.
+ */
+export function MemberJoinPanel({
+  orderReference = null,
+  automaticOnly = false,
+  refresh = 0,
+  client = memberClient,
+}: {
+  readonly orderReference?: string | null;
+  /** Where joining isn't offered (the order page): only adds a signed-in member's points. */
+  readonly automaticOnly?: boolean;
+  /** A change reads again (the order was just paid). */
+  readonly refresh?: unknown;
+  readonly client?: MemberClient;
+}) {
+  useLanguage();
+  const [state, setState] = useState<MemberState | null>(null);
+  const [part, setPart] = useState<number | null>(null);
+  const [earned, setEarned] = useState<number | null>(null);
+  // Batch 63 review: points this panel already added before a later part failed.
+  const [earnedBefore, setEarnedBefore] = useState(0);
+  // ... and which parts those were: never offered or claimed again here, even if the offer can't
+  // be read again just then.
+  const [claimedParts, setClaimedParts] = useState<ReadonlySet<number | null>>(() => new Set());
+  const [auto, setAuto] = useState(0);
+  const [skipped, setSkipped] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      let current = await client.state(orderReference);
+      // A signed-in member who certainly paid: their points, without asking. A failure leaves the
+      // button; nothing here can get in the way of the receipt or of paying.
+      if (current.signedIn && current.claim) {
+        let added = 0;
+        for (const part of current.claim.parts)
+          if (part.certain === true)
+            added += await client
+              .claim(part.partNumber, orderReference)
+              .then((answer) => answer.earnedPoints)
+              .catch(() => 0);
+        if (added > 0) {
+          if (live) setAuto(added);
+          current = await client.state(orderReference);
+        }
+      }
+      if (live) setState(current);
+    })().catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [client, orderReference, refresh]);
+  if (state === null || !state.offered) return null;
+  const addedNote =
+    auto > 0 ? (
+      <p className="member-panel__added" role="status">
+        {t("{points} points added for this order.", { points: String(auto) })}
+        {wordGap()}
+        <Link to="/member">{t("See your points")}</Link>
+      </p>
+    ) : null;
+  if (automaticOnly) return addedNote;
+  if (earned !== null)
+    return (
+      <section className="member-panel" aria-labelledby="member-panel-title">
+        <h2 id="member-panel-title">{t("You’re a member")}</h2>
+        <p role="status">
+          {earned > 0
+            ? t("{points} points added for this order.", { points: String(earned) })
+            : t("You’re signed in.")}
+        </p>
+        <p>
+          <Link to="/member">{t("See your points")}</Link>
+        </p>
+      </section>
+    );
+  const claim = state.claim ?? null;
+  if (claim === null)
+    return addedNote !== null ? (
+      addedNote
+    ) : state.signedIn ? (
+      <p className="member-panel__link">
+        <Link to="/member">{t("See your points")}</Link>
+      </p>
+    ) : null;
+  const until = new Date(claim.until).toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+  if (skipped)
+    return (
+      <p className="member-panel__link" role="status">
+        {t("No problem. You can still add this order’s points on this phone until {time}.", {
+          time: until,
+        })}
+        {wordGap()}
+        <button type="button" onClick={() => setSkipped(false)}>
+          {t("Join now")}
+        </button>
+      </p>
+    );
+  // v15 batch 8: a phone that paid a part on its own card knows which part it paid: it is offered
+  // that part only, never asked "which part did you pay?" beside parts others paid at the counter.
+  // Batch 63 (F06): a phone that paid several parts is offered all of them, together.
+  const { parts, allOwn } = memberClaimParts(
+    claim.parts.filter((entry) => !claimedParts.has(entry.partNumber)),
+  );
+  const together = allOwn && parts.length > 1;
+  const several = parts.length > 1 && !together;
+  const chosen = several ? parts.find((entry) => entry.partNumber === part) : parts[0];
+  const points = together
+    ? parts.reduce((sum, entry) => sum + entry.points, 0)
+    : (chosen?.points ?? Math.max(...parts.map((entry) => entry.points)));
+  // v15 M60: a refund on this order already takes its share off these points. v15 b61 live: said
+  // only of the points shown: before a part is chosen, those are the largest part's, which another
+  // part's refund never touched.
+  const afterRefund = together
+    ? parts.some((entry) => entry.afterRefund === true)
+    : chosen !== undefined
+      ? chosen.afterRefund === true
+      : parts.length > 0 &&
+        parts
+          .filter((entry) => entry.points === points)
+          .every((entry) => entry.afterRefund === true);
+  const partNumber = several ? part : (parts[0]?.partNumber ?? null);
+  /**
+   * Batch 63: this phone's own parts, claimed in turn — the first (or joining with it), then the
+   * rest. Batch 63 review: a part already claimed is never claimed again. When one fails, the
+   * offer is read again (the server no longer lists a part once its points are added), so trying
+   * again claims only the parts still unclaimed, and the points already added stay counted.
+   */
+  const claimInTurn = async (first: () => Promise<number>) => {
+    let earnedAll = earnedBefore;
+    const claimed = new Set(claimedParts);
+    try {
+      earnedAll += await first();
+      claimed.add(partNumber);
+      if (together)
+        for (const entry of parts.slice(1)) {
+          earnedAll += (await client.claim(entry.partNumber, orderReference)).earnedPoints;
+          claimed.add(entry.partNumber);
+        }
+      setEarned(earnedAll);
+    } catch (error) {
+      // The first claim (or joining) failed: nothing was added, the guest's choice stays.
+      if (claimed.size === claimedParts.size) throw error;
+      setEarnedBefore(earnedAll);
+      setClaimedParts(claimed);
+      const again = await client.state(orderReference).catch(() => null);
+      if (again !== null) {
+        // Nothing left to claim: what was added is all there was.
+        if (again.claim === null || again.claim === undefined) {
+          if (earnedAll > 0) setEarned(earnedAll);
+          setState(again);
+          return;
+        }
+        setPart(null);
+        setState(again);
+      }
+      setProblem(memberCodeProblem(error, claim.until));
+      throw error;
+    }
+  };
+  const add = async () => {
+    setBusy(true);
+    setProblem(null);
+    try {
+      await claimInTurn(async () => (await client.claim(partNumber, orderReference)).earnedPoints);
+    } catch (error) {
+      setProblem(memberCodeProblem(error, claim.until));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="member-panel" aria-labelledby="member-panel-title">
+      {addedNote}
+      <h2 id="member-panel-title">
+        {together
+          ? afterRefund
+            ? state.signedIn
+              ? t("Add {points} points for what you paid (after the refund)", {
+                  points: String(points),
+                })
+              : t("Join and earn {points} points on what you paid (after the refund)", {
+                  points: String(points),
+                })
+            : state.signedIn
+              ? t("Add {points} points for what you paid", { points: String(points) })
+              : t("Join and earn {points} points on what you paid", { points: String(points) })
+          : afterRefund
+            ? state.signedIn
+              ? t("Add {points} points for this order (after the refund)", {
+                  points: String(points),
+                })
+              : t("Join and earn {points} points on this order (after the refund)", {
+                  points: String(points),
+                })
+            : state.signedIn
+              ? t("Add {points} points for this order", { points: String(points) })
+              : t("Join and earn {points} points on this order", { points: String(points) })}
+      </h2>
+      <p>{scanToOrderOnlyText()}</p>
+      {several ? (
+        <fieldset className="member-panel__parts">
+          <legend>{t("Which part did you pay?")}</legend>
+          {parts.map((entry) => (
+            <label key={entry.partNumber}>
+              <input
+                type="radio"
+                name="member-part"
+                checked={part === entry.partNumber}
+                onChange={() => setPart(entry.partNumber)}
+              />{" "}
+              {t("Part {number} · {points} points", {
+                number: String(entry.partNumber),
+                points: String(entry.points),
+              })}
+            </label>
+          ))}
+        </fieldset>
+      ) : null}
+      {several && part === null ? null : state.signedIn ? (
+        <>
+          {problem === null ? null : <p role="alert">{problem}</p>}
+          <button type="button" disabled={busy} onClick={() => void add()}>
+            {t("Add my points")}
+          </button>
+        </>
+      ) : (
+        <MemberSignIn
+          client={client}
+          until={claim.until}
+          askConsent
+          submitLabel={t("Join and add my points")}
+          verify={async ({ phone, code, marketingConsent }) => {
+            await claimInTurn(
+              async () =>
+                (
+                  await client.verify({
+                    phone,
+                    code,
+                    marketingConsent,
+                    claim: true,
+                    partNumber,
+                    orderReference,
+                  })
+                ).earnedPoints,
+            );
+          }}
+        />
+      )}
+      {state.signedIn ? null : (
+        <button type="button" className="member-panel__skip" onClick={() => setSkipped(true)}>
+          {t("Not now")}
+        </button>
+      )}
+    </section>
+  );
+}

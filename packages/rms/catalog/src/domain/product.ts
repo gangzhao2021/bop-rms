@@ -1,3 +1,7 @@
+import {
+  parseProductEditorContentDetails,
+  type ProductEditorContentDetails,
+} from "./product-editor-content.js";
 export const catalogErrorCodes = [
   "CATALOG_INPUT_INVALID",
   "CATALOG_UNAVAILABLE",
@@ -7,6 +11,11 @@ export const catalogErrorCodes = [
   "CATALOG_CODE_CONFLICT",
   "CATALOG_LIFECYCLE_CONFLICT",
   "CATALOG_DEPENDENCY_UNAVAILABLE",
+  // WP-2423 Q19: the person who submitted a menu for review cannot approve it (unless sole operator).
+  "CATALOG_INDEPENDENT_APPROVAL_REQUIRED",
+  // WP-2423 Q15/Q16: the Brand has not registered any tax classifications yet (an empty state, not
+  // a failure); readers that need a registry still treat it as unavailable.
+  "CATALOG_TAX_CLASSIFICATION_NOT_REGISTERED",
 ] as const;
 export type CatalogErrorCode = (typeof catalogErrorCodes)[number];
 
@@ -45,7 +54,30 @@ export interface CatalogSku {
   readonly createdAt: CatalogInstant;
   readonly createdByActorReference: CatalogReference;
 }
+/** Product Version organization value. Omitted legacy data is not an empty set. */
+export interface ProductCategoryClassification {
+  readonly categoryReferences: readonly CatalogReference[];
+  readonly primaryCategoryReference: CatalogReference | null;
+}
+
+/**
+ * WP-2423: what customers read about a Product on the menu (shared by all of its sizes). Omitted
+ * on legacy versions; `{ localizedDescriptions: {}, photo: null }` is an explicit "none".
+ */
+export interface ProductCustomerPresentation {
+  /** Plain text, 1..240 characters per language; may be empty. */
+  readonly localizedDescriptions: Readonly<Record<string, string>>;
+  /** A photo recorded by Media for this Product; alt text 1..160 characters incl. the default language. */
+  readonly photo: {
+    readonly imageReference: CatalogReference;
+    readonly localizedAltText: Readonly<Record<string, string>>;
+  } | null;
+}
+
 export interface ProductVersion {
+  readonly editorContent?: ProductEditorContentDetails;
+  readonly categoryClassification?: ProductCategoryClassification;
+  readonly customerPresentation?: ProductCustomerPresentation;
   readonly versionReference: CatalogReference;
   readonly baseVersionReference: CatalogReference | null;
   readonly status: "Draft";
@@ -112,7 +144,11 @@ const locale = /^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-[A-Z]{2}|\d{3})?$/u;
 function invalid(): never {
   throw new CatalogError("CATALOG_INPUT_INVALID");
 }
-function exact(value: unknown, keys: readonly string[]): Readonly<Record<string, unknown>> {
+function exact(
+  value: unknown,
+  keys: readonly string[],
+  optional: readonly string[] = [],
+): Readonly<Record<string, unknown>> {
   try {
     if (
       value === null ||
@@ -124,12 +160,13 @@ function exact(value: unknown, keys: readonly string[]): Readonly<Record<string,
     const own = Reflect.ownKeys(value);
     const descriptors = Object.getOwnPropertyDescriptors(value);
     if (
-      own.length !== keys.length ||
-      own.some((key) => typeof key !== "string" || !keys.includes(key))
+      own.length < keys.length ||
+      own.length > keys.length + optional.length ||
+      own.some((key) => typeof key !== "string" || ![...keys, ...optional].includes(key))
     )
       return invalid();
     const result: Record<string, unknown> = {};
-    for (const key of keys) {
+    for (const key of [...keys, ...optional.filter((key) => Object.hasOwn(value, key))]) {
       const descriptor = descriptors[key];
       if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable)
         return invalid();
@@ -141,6 +178,116 @@ function exact(value: unknown, keys: readonly string[]): Readonly<Record<string,
     return invalid();
   }
 }
+function items(value: unknown): readonly unknown[] {
+  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) return invalid();
+  const length = Object.getOwnPropertyDescriptor(value, "length");
+  if (
+    !length ||
+    !("value" in length) ||
+    !Number.isSafeInteger(length.value) ||
+    length.value < 0 ||
+    length.value > 10000
+  )
+    return invalid();
+  const n: number = length.value;
+  if (Reflect.ownKeys(value).length !== n + 1) return invalid();
+  const result: unknown[] = [];
+  for (let i = 0; i < n; i++) {
+    const d = Object.getOwnPropertyDescriptor(value, String(i));
+    if (!d || !("value" in d) || !d.enumerable) return invalid();
+    result.push(d.value);
+  }
+  return result;
+}
+export function parseProductCategoryClassification(value: unknown): ProductCategoryClassification {
+  try {
+    const raw = exact(value, ["categoryReferences", "primaryCategoryReference"]);
+    const refs = items(raw.categoryReferences).map(parseCatalogReference);
+    if (new Set(refs).size !== refs.length) return invalid();
+    const primary =
+      raw.primaryCategoryReference === null
+        ? null
+        : parseCatalogReference(raw.primaryCategoryReference);
+    if (primary !== null && !refs.includes(primary)) return invalid();
+    return Object.freeze({
+      categoryReferences: Object.freeze(refs.sort()),
+      primaryCategoryReference: primary,
+    });
+  } catch {
+    return invalid();
+  }
+}
+
+export const productDescriptionMaximumLength = 240;
+export const productPhotoAltTextMaximumLength = 160;
+/**
+ * WP-2423: customer-facing plain text (descriptions, photo alternative text). Whitespace is trimmed
+ * and collapsed to single spaces; control/format characters, markup braces and links are refused.
+ * Idempotent: a normalised value normalises to itself.
+ */
+export function normalizeCatalogPlainText(value: unknown, maximumLength: number): string {
+  if (typeof value !== "string") return invalid();
+  const text = value.replace(/\s+/gu, " ").trim();
+  if (
+    text.length < 1 ||
+    text.length > maximumLength ||
+    /[\p{Cc}\p{Cf}<>{}]|https?:\/\/|www\./iu.test(text)
+  )
+    return invalid();
+  return text;
+}
+/** Localized plain text keyed by locale; `requiredLocale` must be present when given. */
+export function parseLocalizedPlainText(
+  value: unknown,
+  maximumLength: number,
+  options: { readonly requiredLocale: string | null; readonly allowEmpty: boolean },
+): Readonly<Record<string, string>> {
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype
+  )
+    return invalid();
+  const keys = Reflect.ownKeys(value);
+  if (keys.length > 32 || (!options.allowEmpty && keys.length === 0)) return invalid();
+  const normalized: Record<string, string> = {};
+  for (const key of keys) {
+    if (typeof key !== "string" || !locale.test(key)) return invalid();
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || !("value" in descriptor) || !descriptor.enumerable) return invalid();
+    normalized[key] = normalizeCatalogPlainText(descriptor.value, maximumLength);
+  }
+  if (options.requiredLocale !== null && !Object.hasOwn(normalized, options.requiredLocale))
+    return invalid();
+  return Object.freeze(normalized);
+}
+export function parseProductCustomerPresentation(
+  value: unknown,
+  defaultLocale: unknown,
+): ProductCustomerPresentation {
+  const parsedDefaultLocale = parseCatalogLocale(defaultLocale);
+  const raw = exact(value, ["localizedDescriptions", "photo"]);
+  const localizedDescriptions = parseLocalizedPlainText(
+    raw.localizedDescriptions,
+    productDescriptionMaximumLength,
+    { requiredLocale: null, allowEmpty: true },
+  );
+  let photo: ProductCustomerPresentation["photo"] = null;
+  if (raw.photo !== null) {
+    const rawPhoto = exact(raw.photo, ["imageReference", "localizedAltText"]);
+    photo = Object.freeze({
+      imageReference: parseCatalogReference(rawPhoto.imageReference),
+      localizedAltText: parseLocalizedPlainText(
+        rawPhoto.localizedAltText,
+        productPhotoAltTextMaximumLength,
+        { requiredLocale: parsedDefaultLocale, allowEmpty: false },
+      ),
+    });
+  }
+  return Object.freeze({ localizedDescriptions, photo });
+}
+
 function positive(value: unknown): number {
   if (!Number.isSafeInteger(value) || (value as number) < 1) return invalid();
   return value as number;
@@ -217,6 +364,31 @@ export function parseLocalizedNames(
   }
   return Object.freeze(normalized);
 }
+/**
+ * WP-2423: the name a customer sees for a sellable. A SKU of a multi-size Product is named by its size
+ * ("Small (8 oz)"), so it is shown after the Product name ("Flat White — Small (8 oz)"); a SKU name that
+ * already carries the Product name, or a Product without its own SKU name, is shown as is.
+ */
+export function sellableDisplayNames(
+  productNames: Readonly<Record<string, string>>,
+  skuNames: Readonly<Record<string, string>>,
+  defaultLocale: unknown,
+): Readonly<Record<string, string>> {
+  const names: Record<string, string> = {};
+  for (const key of new Set([...Object.keys(productNames), ...Object.keys(skuNames)])) {
+    const product = productNames[key]?.trim();
+    const sku = skuNames[key]?.trim();
+    if (!sku) names[key] = product ?? "";
+    else if (!product || sku.toLocaleLowerCase().startsWith(product.toLocaleLowerCase()))
+      names[key] = sku;
+    else {
+      const composed = `${product} — ${sku}`;
+      // Names stay within the 120-character limit; an over-long pair keeps the SKU name alone.
+      names[key] = composed.length <= 120 ? composed : sku;
+    }
+  }
+  return parseLocalizedNames(names, defaultLocale);
+}
 function lifecycle(value: unknown): ProductLifecycle {
   if (
     value !== "Draft" &&
@@ -230,6 +402,16 @@ function lifecycle(value: unknown): ProductLifecycle {
 }
 export function parseProductLifecycle(value: unknown): ProductLifecycle {
   return lifecycle(value);
+}
+/** Governance reason code obeys the existing append-only Audit stable-code constraint. */
+export function parseCatalogLifecycleReasonCode(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    value.trim() !== value ||
+    !/^[A-Z][A-Z0-9_]{0,127}$/u.test(value)
+  )
+    return invalid();
+  return value;
 }
 export function parseVariantSelection(value: unknown): VariantSelection {
   const raw = exact(value, ["dimensionReference", "valueReference"]);
@@ -346,18 +528,22 @@ export function parseCatalogSku(value: unknown): CatalogSku {
   });
 }
 export function parseProductVersion(value: unknown): ProductVersion {
-  const raw = exact(value, [
-    "versionReference",
-    "baseVersionReference",
-    "status",
-    "defaultLocale",
-    "localizedNames",
-    "taxClassificationReference",
-    "skus",
-    "optionBindings",
-    "createdAt",
-    "updatedAt",
-  ]);
+  const raw = exact(
+    value,
+    [
+      "versionReference",
+      "baseVersionReference",
+      "status",
+      "defaultLocale",
+      "localizedNames",
+      "taxClassificationReference",
+      "skus",
+      "optionBindings",
+      "createdAt",
+      "updatedAt",
+    ],
+    ["categoryClassification", "editorContent", "customerPresentation"],
+  );
   if (
     raw.status !== "Draft" ||
     typeof raw.defaultLocale !== "string" ||
@@ -387,7 +573,7 @@ export function parseProductVersion(value: unknown): ProductVersion {
   const createdAt = parseCatalogInstant(raw.createdAt);
   const updatedAt = parseCatalogInstant(raw.updatedAt);
   if (Date.parse(updatedAt) < Date.parse(createdAt)) return invalid();
-  return Object.freeze({
+  const base: ProductVersion = Object.freeze({
     versionReference: parseCatalogReference(raw.versionReference),
     baseVersionReference:
       raw.baseVersionReference === null ? null : parseCatalogReference(raw.baseVersionReference),
@@ -400,9 +586,26 @@ export function parseProductVersion(value: unknown): ProductVersion {
         : parseCatalogReference(raw.taxClassificationReference),
     skus,
     optionBindings,
+    ...(Object.hasOwn(raw, "categoryClassification")
+      ? { categoryClassification: parseProductCategoryClassification(raw.categoryClassification) }
+      : {}),
+    ...(Object.hasOwn(raw, "customerPresentation")
+      ? {
+          customerPresentation: parseProductCustomerPresentation(
+            raw.customerPresentation,
+            raw.defaultLocale,
+          ),
+        }
+      : {}),
     createdAt,
     updatedAt,
   });
+  return raw.editorContent === undefined && !Object.hasOwn(raw, "editorContent")
+    ? base
+    : Object.freeze({
+        ...base,
+        editorContent: parseProductEditorContentDetails(raw.editorContent, base),
+      });
 }
 export function parseProductAggregate(value: unknown): ProductAggregate {
   const raw = exact(value, [

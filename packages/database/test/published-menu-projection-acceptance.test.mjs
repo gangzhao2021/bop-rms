@@ -6,6 +6,7 @@ import { it } from "vitest";
 import {
   createPostgresPublishedMenuQueryStore,
   createCustomerMenuQueryService,
+  createCatalogSelectionDisplayQuery,
 } from "../../rms/catalog/src/index.ts";
 import { CustomerMenuHandler } from "../../../apps/api/src/customer-menu.ts";
 import { createApiServerRuntime, createApiRuntimeLogger } from "../../../apps/api/src/server.ts";
@@ -14,6 +15,7 @@ const { Client } = pg;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const id = (n) => `018f7300-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const at = "2026-08-02T16:00:00.000Z";
+const contextInput = { channelCode: "DINE_IN", orderTypeCode: "TABLE_SERVICE", requestedAt: at };
 const optionRules = [
   {
     bindingReference: id(31),
@@ -34,6 +36,30 @@ const optionRules = [
   },
 ];
 const digest = `sha256:${"a".repeat(64)}`;
+// WP-2423 menu descriptions and photos: a reviewed description and photo (synthetic image paths).
+const presentation = {
+  localizedDescriptions: { "en-CA": "Espresso with steamed milk." },
+  photo: {
+    imageReference: id(60),
+    localizedAltText: { "en-CA": "A latte in a glass cup" },
+    width: 1280,
+    height: 960,
+    renditions: [320, 640, 1280].flatMap((width, index) => [
+      {
+        contentType: "image/jpeg",
+        width,
+        height: width * 0.75,
+        path: `/media/images/${String(index * 2).repeat(64)}.jpg`,
+      },
+      {
+        contentType: "image/webp",
+        width,
+        height: width * 0.75,
+        path: `/media/images/${String(index * 2 + 1).repeat(64)}.webp`,
+      },
+    ]),
+  },
+};
 async function prove(context) {
   const admin = new Client(context.clientConfig);
   const role = `wp2220_${context.runId}`;
@@ -49,6 +75,21 @@ async function prove(context) {
       `INSERT INTO rms_catalog.menu_version (menu_version_id,menu_id,brand_id,status,default_locale,localized_names_json,created_at,updated_at) VALUES ($1,$2,$3,'Draft','en-CA','{"en-CA":"All Day"}'::jsonb,$4,$4)`,
       [id(4), id(1), id(2), at],
     );
+    // Synthetic published owner facts, not a production approval.
+    for (const [table, field, value] of [
+      ["menu_version_store", "store_id", id(20)],
+      ["menu_version_channel", "channel_code", "DINE_IN"],
+      ["menu_version_order_type", "order_type_code", "TABLE_SERVICE"],
+    ])
+      await admin.query(
+        "INSERT INTO rms_catalog." +
+          table +
+          " (menu_version_id,menu_id,brand_id," +
+          field +
+          ") VALUES ($1,$2,$3,$4)",
+        [id(4), id(1), id(2), value],
+      );
+    // Submitted after its content (a submitted Menu version is frozen, DEC-MENU-REVISION).
     await admin.query(
       `INSERT INTO rms_catalog.menu_publication_revision (lifecycle_id,lifecycle_version,menu_id,menu_version_id,brand_id,snapshot_digest,state,validation_evidence_id,approval_evidence_id,changed_at) VALUES ($1,4,$2,$3,$4,$5,'Published',$6,$7,$8)`,
       [id(5), id(1), id(4), id(2), digest, id(6), id(7), at],
@@ -56,6 +97,12 @@ async function prove(context) {
     await admin.query(
       `INSERT INTO rms_catalog.menu_publication_release (release_id,lifecycle_id,lifecycle_version,menu_id,menu_version_id,brand_id,release_sequence,release_kind,snapshot_digest,created_at) VALUES ($1,$2,4,$3,$4,$5,1,'Publish',$6,$7)`,
       [id(8), id(5), id(1), id(4), id(2), digest, at],
+    );
+    await admin.query(
+      `INSERT INTO rms_catalog.menu_release_effective_period
+       (timing_version_id,release_id,menu_id,brand_id,time_zone,effective_from,period_digest,approval_evidence_id,created_at)
+       VALUES ($1,$2,$3,$4,'UTC',$5,$6,$7,$5)`,
+      [id(50), id(8), id(1), id(2), at, digest, id(7)],
     );
     await admin.query(
       `INSERT INTO rms_catalog.published_menu_projection_generation (generation_id,brand_id,menu_id,projection_name,projection_version,generation_status,source_event_id,source_aggregate_version,source_checkpoint,last_rebuilt_at,freshness_status) VALUES ($1,$2,$3,'catalog_published_menu_v1',1,'Active',$4,4,$4,$5,'Fresh')`,
@@ -72,6 +119,19 @@ async function prove(context) {
     await admin.query(
       `INSERT INTO rms_catalog.published_menu_projection_sellable (generation_id,brand_id,menu_id,section_id,placement_id,sellable_id,product_version_id,localized_names_json,presentation_role,sort_order,pinned,configured_availability,option_rules_json,allergen_disclosure_json) VALUES ($1,$2,$3,$4,$5,$6,$7,'{"en-CA":"Latte"}'::jsonb,'Standard',0,false,'Available',$8::jsonb,'{"registryVersionReference":"018f7300-0000-7000-8000-000000000019","items":[],"allergenFreeClaim":false,"assistanceCode":"ALLERGEN_ASSISTANCE_REQUIRED"}'::jsonb)`,
       [id(9), id(2), id(1), id(11), id(12), id(13), id(14), JSON.stringify(optionRules)],
+    );
+    // WP-2423: the presentation column holds one bounded JSON object or nothing.
+    for (const invalid of ["[]", '"text"', JSON.stringify({ text: "x".repeat(17000) })])
+      await assert.rejects(
+        admin.query(
+          `INSERT INTO rms_catalog.published_menu_projection_sellable (generation_id,brand_id,menu_id,section_id,placement_id,sellable_id,product_version_id,localized_names_json,presentation_role,sort_order,pinned,configured_availability,option_rules_json,allergen_disclosure_json,presentation_json) VALUES ($1,$2,$3,$4,$5,$6,$7,'{"en-CA":"Latte"}'::jsonb,'Standard',0,false,'Available',$8::jsonb,'{"registryVersionReference":"018f7300-0000-7000-8000-000000000019","items":[],"allergenFreeClaim":false,"assistanceCode":"ALLERGEN_ASSISTANCE_REQUIRED"}'::jsonb,$9::jsonb)`,
+          [id(9), id(2), id(1), id(11), id(61), id(62), id(14), "[]", invalid],
+        ),
+        /presentation_check/u,
+      );
+    await admin.query(
+      `INSERT INTO rms_catalog.published_menu_projection_sellable (generation_id,brand_id,menu_id,section_id,placement_id,sellable_id,product_version_id,localized_names_json,presentation_role,sort_order,pinned,configured_availability,option_rules_json,allergen_disclosure_json,presentation_json) VALUES ($1,$2,$3,$4,$5,$6,$7,'{"en-CA":"Latte"}'::jsonb,'Standard',1,false,'Available',$8::jsonb,'{"registryVersionReference":"018f7300-0000-7000-8000-000000000019","items":[],"allergenFreeClaim":false,"assistanceCode":"ALLERGEN_ASSISTANCE_REQUIRED"}'::jsonb,$9::jsonb)`,
+      [id(9), id(2), id(1), id(11), id(63), id(64), id(65), "[]", JSON.stringify(presentation)],
     );
     await admin.query(
       `INSERT INTO rms_catalog.published_menu_projection_checkpoint (consumer_name,brand_id,menu_id,active_generation_id,source_event_id,source_aggregate_version,projected_at) VALUES ('catalog.published-menu-projection',$1,$2,$3,$4,4,$5)`,
@@ -104,6 +164,12 @@ async function prove(context) {
     );
     await admin.query(
       `GRANT SELECT ON rms_catalog.published_menu_projection_generation, rms_catalog.published_menu_projection, rms_catalog.published_menu_projection_section, rms_catalog.published_menu_projection_sellable, rms_catalog.published_menu_projection_checkpoint TO ${role}`,
+    );
+    await admin.query(
+      `GRANT SELECT ON rms_catalog.menu_release_effective_period,rms_catalog.menu_release_effective_end,
+      rms_catalog.menu_publication_release,rms_catalog.menu_publication_revision,
+      rms_catalog.menu_version_store,rms_catalog.menu_version_channel,
+      rms_catalog.menu_version_order_type TO ` + role,
     );
     await admin.query(`SET ROLE ${role}`);
     assert.equal(
@@ -142,29 +208,37 @@ async function prove(context) {
       },
     };
     const store = createPostgresPublishedMenuQueryStore(runner, scope);
-    const [candidate] = await store.loadCandidates(scope);
-    assert.equal(reads, 1);
+    const [candidate] = await store.loadCandidates({ ...scope, ...contextInput });
+    assert.equal(reads, 2);
     assert.equal(candidate.generationReference, id(9));
     assert.equal(candidate.lastRebuiltAt, at);
     assert.equal(candidate.snapshot.effectiveFrom, at);
     assert.equal(candidate.snapshot.effectiveUntil, null);
     assert.deepEqual(candidate.snapshot.sections[0].sellables[0].optionRules, optionRules);
+    assert.equal(Object.hasOwn(candidate.snapshot.sections[0].sellables[0], "presentation"), false);
+    assert.deepEqual(candidate.snapshot.sections[0].sellables[1].presentation, presentation);
     assert.equal(
       candidate.snapshot.sections[0].sellables[0].allergenDisclosure.allergenFreeClaim,
       false,
     );
-    assert.deepEqual(await store.loadCandidates(scope), [candidate]);
+    assert.deepEqual(await store.loadCandidates({ ...scope, ...contextInput }), [candidate]);
     const beforeDenied = reads;
-    await assert.rejects(store.loadCandidates({ ...scope, storeReference: id(99) }), {
-      code: "CATALOG_DEPENDENCY_UNAVAILABLE",
-    });
+    await assert.rejects(
+      store.loadCandidates({ ...scope, ...contextInput, storeReference: id(99) }),
+      {
+        code: "CATALOG_DEPENDENCY_UNAVAILABLE",
+      },
+    );
     assert.equal(reads, beforeDenied);
     for (const other of [
       { ...scope, brandReference: id(99) },
       { ...scope, storeReference: id(99) },
     ])
       assert.deepEqual(
-        await createPostgresPublishedMenuQueryStore(runner, other).loadCandidates(other),
+        await createPostgresPublishedMenuQueryStore(runner, other).loadCandidates({
+          ...other,
+          ...contextInput,
+        }),
         [],
       );
     const query = createCustomerMenuQueryService({
@@ -187,6 +261,20 @@ async function prove(context) {
     assert.equal(found.status, "Found");
     assert.equal(found.menu.sections[0].sellables[0].name, "Latte");
     assert.equal(found.menu.sections[0].sellables[0].displayPrice.status, "Unavailable");
+    assert.equal(found.menu.sections[0].sellables[0].description, null);
+    assert.equal(found.menu.sections[0].sellables[0].photo, null);
+    assert.equal(found.menu.sections[0].sellables[1].description, "Espresso with steamed milk.");
+    assert.deepEqual(found.menu.sections[0].sellables[1].photo, {
+      altText: "A latte in a glass cup",
+      width: 1280,
+      height: 960,
+      renditions: presentation.photo.renditions.map((rendition) => ({
+        url: rendition.path,
+        contentType: rendition.contentType,
+        width: rendition.width,
+        height: rendition.height,
+      })),
+    });
     runtime = createApiServerRuntime({
       host: "127.0.0.1",
       port: 0,
@@ -251,11 +339,19 @@ async function prove(context) {
       "UPDATE rms_catalog.published_menu_projection_generation SET freshness_status='Fresh', generation_status='Building' WHERE generation_id=$1",
       [id(9)],
     );
+    assert.deepEqual(
+      await store.loadVersionCandidates({ ...scope, menuVersionReference: id(4) }),
+      [],
+    );
     assert.deepEqual(await query.getPublishedMenu(request), { status: "Unavailable" });
     await menuError(await menuRequest(), 503, "menu_service_unavailable");
     await admin.query(
       "UPDATE rms_catalog.published_menu_projection_generation SET generation_status='Active', source_checkpoint=$1 WHERE generation_id=$2",
       [id(99), id(9)],
+    );
+    assert.deepEqual(
+      await store.loadVersionCandidates({ ...scope, menuVersionReference: id(4) }),
+      [],
     );
     assert.deepEqual(await query.getPublishedMenu(request), { status: "Unavailable" });
     await menuError(await menuRequest(), 503, "menu_service_unavailable");
@@ -263,7 +359,26 @@ async function prove(context) {
       "UPDATE rms_catalog.published_menu_projection_generation SET source_checkpoint=$1 WHERE generation_id=$2",
       [id(10), id(9)],
     );
-    assert.deepEqual(await store.loadCandidates(scope), [candidate]);
+    assert.deepEqual(await store.loadCandidates({ ...scope, ...contextInput }), [candidate]);
+    const versionRequest = { ...scope, menuVersionReference: id(4) };
+    assert.deepEqual(await store.loadVersionCandidates(versionRequest), [candidate]);
+    assert.deepEqual(
+      await store.loadVersionCandidates({ ...versionRequest, menuVersionReference: id(99) }),
+      [],
+    );
+    const display = createCatalogSelectionDisplayQuery(store);
+    const displayInput = {
+      ...versionRequest,
+      productVersionReference: id(14),
+      sellableReference: id(13),
+      channelCode: "DINE_IN",
+      orderTypeCode: "TABLE_SERVICE",
+      locale: "en-CA",
+      ruleEvidence: [{ bindingReference: id(31), optionSetVersionReference: id(32) }],
+      optionReferences: [id(33)],
+    };
+    const beforeDisplay = await display.describe(displayInput);
+    assert.equal(beforeDisplay.status, "Found");
     // A newly selected incomplete generation must never fall back to the retired content.
     await admin.query(
       "UPDATE rms_catalog.published_menu_projection_generation SET generation_status='Retired' WHERE generation_id=$1",
@@ -293,16 +408,26 @@ async function prove(context) {
       FROM rms_catalog.published_menu_projection WHERE generation_id=$2`,
       [id(40), id(9)],
     );
-    const global = await store.loadCandidates(scope);
+    assert.deepEqual(await store.loadVersionCandidates(versionRequest), [candidate]);
+    assert.deepEqual(await display.describe(displayInput), beforeDisplay);
+    assert.deepEqual(
+      await createPostgresPublishedMenuQueryStore(runner, {
+        ...scope,
+        storeReference: id(99),
+      }).loadVersionCandidates({ ...versionRequest, storeReference: id(99) }),
+      [],
+    );
+    const global = await store.loadCandidates({ ...scope, ...contextInput });
     assert.equal(global.length, 1);
     assert.equal(global[0].generationReference, id(40));
     assert.deepEqual(global[0].snapshot.storeReferences, []);
     const otherStoreScope = { ...scope, storeReference: id(99) };
     assert.deepEqual(
-      await createPostgresPublishedMenuQueryStore(runner, otherStoreScope).loadCandidates(
-        otherStoreScope,
-      ),
-      global,
+      await createPostgresPublishedMenuQueryStore(runner, otherStoreScope).loadCandidates({
+        ...otherStoreScope,
+        ...contextInput,
+      }),
+      [],
     );
     for (const sql of [
       "SELECT * FROM rms_catalog.menu",

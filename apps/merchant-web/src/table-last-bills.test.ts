@@ -1,0 +1,84 @@
+// @vitest-environment jsdom
+import { beforeEach, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import {
+  clearLastBills,
+  LAST_BILLS_KEY,
+  lastTableBill,
+  loadLastBills,
+  saveLastBills,
+} from "./table-last-bills.js";
+import { parseTableBill } from "./table-checkout-client.js";
+import { splitBillFixture } from "./table-split.fixtures.js";
+import { TablesOfflineGuide } from "./TablesOfflineGuide.js";
+
+const table = {
+  label: "T2",
+  owedMinor: "2685",
+  settled: false,
+  rounds: [
+    { number: 1, totalMinor: "2685", items: [{ name: "Mapo tofu", subtotalMinor: "1588" }] },
+  ],
+};
+beforeEach(() => localStorage.clear());
+
+it("keeps each table's last bill on this device, as of when it was read", () => {
+  saveLastBills([table], new Date("2026-11-03T22:00:00.000Z"));
+  const read = loadLastBills(Date.parse("2026-11-03T22:30:00.000Z"));
+  expect(read?.savedAt).toBe("2026-11-03T22:00:00.000Z");
+  expect(read?.tables).toEqual([table]);
+});
+
+it("never shows last night's bills as tonight's", () => {
+  saveLastBills([table], new Date("2026-11-03T02:00:00.000Z"));
+  expect(loadLastBills(Date.parse("2026-11-03T22:30:00.000Z"))).toBeNull();
+});
+
+it("holds nothing when no table is open or after signing out", () => {
+  saveLastBills([table]);
+  saveLastBills([]);
+  expect(localStorage.getItem(LAST_BILLS_KEY)).toBeNull();
+  saveLastBills([table]);
+  clearLastBills();
+  expect(loadLastBills()).toBeNull();
+});
+
+it("reads nothing from a damaged value", () => {
+  localStorage.setItem(LAST_BILLS_KEY, "{not json");
+  expect(loadLastBills()).toBeNull();
+});
+
+// DEC-TAX-WHOLE-RECEIPT: during an outage staff read the same figures as checkout. b15: one tax
+// figure — each round as the bill charges it (its share of the rounding in it), no rounding line.
+it("keeps each round as the bill charges it, adding up to what is owed", () => {
+  const value = splitBillFixture();
+  const rounds = value.rounds as Record<string, unknown>[];
+  rounds[0] = { ...rounds[0], taxMinor: "630", totalMinor: "5480", taxRoundingMinor: "-1" };
+  value.owed = { subtotalMinor: "8400", taxMinor: "1091", totalMinor: "9491" };
+  const kept = lastTableBill("T8", parseTableBill(value));
+  expect(kept.rounds.map((round) => round.totalMinor)).toEqual(["5480", "4011"]);
+  expect(kept.taxRoundingMinor).toBe("0");
+  expect(kept.owedMinor).toBe("9491");
+  saveLastBills([kept]);
+  const html = renderToStaticMarkup(createElement(TablesOfflineGuide));
+  expect(html).toContain("<dt>Round 1</dt><dd>$54.80</dd>");
+  expect(html).not.toContain("Tax rounding");
+  expect(html).toContain("To pay $94.91");
+});
+
+// b13 review: a manager who switches Store on this device never reads the other Store's table "1".
+it("says a saved bill only for the Store it was read in", () => {
+  saveLastBills([table], new Date("2026-11-03T22:00:00.000Z"), {
+    storeReference: "store-a",
+    storeLabel: "Downtown",
+  });
+  const now = Date.parse("2026-11-03T22:01:00.000Z");
+  expect(loadLastBills(now, "store-a")?.tables).toEqual([table]);
+  expect(loadLastBills(now, "store-a")?.storeLabel).toBe("Downtown");
+  expect(loadLastBills(now, "store-b")).toBeNull();
+  // A value an older page saved names no Store: never said for a Store.
+  saveLastBills([table], new Date("2026-11-03T22:00:00.000Z"));
+  expect(loadLastBills(now, "store-a")).toBeNull();
+  expect(loadLastBills(now)?.tables).toEqual([table]);
+});

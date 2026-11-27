@@ -2,7 +2,10 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    include: ["packages/database/test/order-submission-acceptance.test.mjs"],
+    include: [
+      "packages/database/test/order-submission-acceptance.test.mjs",
+      "packages/database/test/configured-order-submission-acceptance.test.mjs",
+    ],
     fileParallelism: false,
     hookTimeout: 180_000,
     testTimeout: 180_000,

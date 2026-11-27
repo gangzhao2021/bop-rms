@@ -216,3 +216,28 @@ describe("WP-0043 health and readiness contract", () => {
     );
   });
 });
+
+describe("WP-2423 (rush-connection-hold) a rush reads as serving, busy", () => {
+  it("stays ready while every connection is in use and says so as degraded", async () => {
+    let load: "busy" | "normal" = "busy";
+    const controller = new HealthReadinessController({
+      databaseProbe: () => "ready",
+      loadProbe: () => load,
+      now: () => "2026-11-14T00:30:05.000Z",
+    });
+    controller.completeStartup();
+    expect(await controller.readinessSnapshot()).toEqual({
+      checkedAt: "2026-11-14T00:30:05.000Z",
+      dependencies: { database: { required: true, status: "ready", load: "busy" } },
+      degraded: true,
+      service: "bop-rms-api",
+      status: "ready",
+    });
+    load = "normal";
+    expect(await controller.readinessSnapshot()).toMatchObject({
+      dependencies: { database: { load: "normal" } },
+      degraded: false,
+      status: "ready",
+    });
+  });
+});

@@ -48,7 +48,6 @@ function command(action = "Create", payload: Record<string, unknown> = {}) {
     brandReference: id(2),
     actorReference: id(3),
     purpose: "InventoryItemManagement",
-    permission: "inventory.manage",
     operationReference: id(4),
     occurredAt: "2026-09-21T10:00:00.000Z",
     action,
@@ -185,5 +184,76 @@ describe("Inventory Item aggregate and service", () => {
         actorReference: id(3),
       }).lifecycle,
     ).toBe("Inactive");
+  });
+});
+
+describe("WP-2423 Inventory Item fine-grained permissions", () => {
+  const permissions = (adapter: ReturnType<typeof ports>) =>
+    (adapter.authorization.authorize as ReturnType<typeof vi.fn>).mock.calls.map(
+      ([request]) => (request as { permission: string }).permission,
+    );
+  const update = (patch: Record<string, unknown>) =>
+    command("Update", {
+      itemReference: id(10),
+      expectedVersion: 1,
+      localizedNames: { "en-CA": "Renamed ingredient" },
+      baseUnit,
+      trackingPolicy,
+      migrationPlanReference: null,
+      ...patch,
+    });
+  it("asks only for the update permission when names change", async () => {
+    const adapter = ports();
+    await executeInventoryItemCommand(update({}), adapter);
+    expect(permissions(adapter)).toEqual(["inventory.item.update"]);
+  });
+  it("also asks for unit and tracking permissions when those change", async () => {
+    const adapter = ports();
+    await executeInventoryItemCommand(
+      update({
+        baseUnit: { ...baseUnit, unitCode: "G", displayPrecision: 0, ledgerPrecision: 2 },
+        trackingPolicy: { ...trackingPolicy, negativeStockPolicy: "ManagerOverride" },
+      }),
+      adapter,
+    );
+    expect(permissions(adapter)).toEqual([
+      "inventory.item.update",
+      "inventory.item.unit.manage",
+      "inventory.item.tracking.manage",
+    ]);
+  });
+  it("refuses a unit change without the unit permission and writes nothing", async () => {
+    const adapter = ports();
+    (adapter.authorization.authorize as ReturnType<typeof vi.fn>).mockImplementation(
+      async (request: { permission: string }) =>
+        request.permission === "inventory.item.unit.manage" ? null : { authorized: true },
+    );
+    await expect(
+      executeInventoryItemCommand(
+        update({
+          baseUnit: { ...baseUnit, unitCode: "G", displayPrecision: 0, ledgerPrecision: 2 },
+        }),
+        adapter,
+      ),
+    ).rejects.toMatchObject({ code: "INVENTORY_ITEM_PERMISSION_DENIED" });
+    expect(adapter.repository.commit).not.toHaveBeenCalled();
+  });
+  it.each([
+    ["Create", "inventory.item.create"],
+    ["Activate", "inventory.item.activate"],
+    ["Deactivate", "inventory.item.deactivate"],
+    ["Restore", "inventory.item.restore"],
+  ])("maps %s to %s", async (action, permission) => {
+    const adapter = ports();
+    await executeInventoryItemCommand(
+      command(
+        action,
+        action === "Create"
+          ? {}
+          : { itemReference: id(10), expectedVersion: 1, reasonCode: "SYNTHETIC" },
+      ),
+      adapter,
+    ).catch(() => undefined);
+    expect(permissions(adapter)[0]).toBe(permission);
   });
 });

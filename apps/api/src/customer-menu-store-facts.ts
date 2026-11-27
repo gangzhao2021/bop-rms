@@ -1,0 +1,354 @@
+import {
+  listBundleComboRecords,
+  listOptionsOffNow,
+  listSellableAllergenChangesSince,
+  listStoreAvailabilityRules,
+  parseAvailabilitySafetyEvidence,
+  parseCatalogCode,
+  parseCatalogInstant,
+  parseCatalogReference,
+  publishedDefaultOptionSelections,
+  publishedRequiredGroupSoldOut,
+  resolveStoreAvailability,
+  sellableAllergenChangeKey,
+  type CustomerMenuQueryPorts,
+  type CustomerMenuStoreFact,
+  type ProductLifecycleTransaction,
+} from "@rms/catalog";
+import {
+  createPostgresCurrentOptionPriceStore,
+  createPostgresCurrentPriceBookStore,
+  currentStorePriceBook,
+  OptionPriceError,
+  PriceResolutionError,
+  resolveOptionPrice,
+  resolvePrice,
+  type CurrencyMetadataSnapshot,
+} from "@rms/pricing";
+import { alcoholMenuFact, readAlcoholSale } from "./alcohol-sale-rule.js";
+import type { CustomerInventoryEvidenceSource } from "./customer-menu-inventory-evidence.js";
+
+/**
+ * WP-2423 8.6: what the customer menu shows for each item at the Store — whether the Store offers
+ * it, whether it is sold out, and its current base price from the Store's assigned price book (the
+ * same book, channel and order type the Quote prices from). WP-2423 slice 4.5: and what one of each
+ * published option adds, from the current option prices the Quote uses. Tax is added in the Quote.
+ * WP-2423 Q12: and whether its ingredients have run out — an offered item one of which (with its
+ * default choices) cannot be made from current stock shows sold out, the same as a manual sold
+ * out, until stock is received or released. Unknown stock never marks an item sold out.
+ */
+export function createCustomerMenuStoreFacts(options: {
+  /** A read-only transaction the caller owns and releases. */
+  readonly transactions: {
+    run<T>(work: (tx: ProductLifecycleTransaction) => Promise<T>): Promise<T>;
+  };
+  readonly currencyMetadata: CurrencyMetadataSnapshot;
+  /** The pricing channel the Quote uses for this customer channel. */
+  readonly priceChannelCode: string;
+  /** Stock observation in the same read; without it items are never sold out from stock. */
+  readonly inventory?: CustomerInventoryEvidenceSource;
+}): NonNullable<CustomerMenuQueryPorts["storeFacts"]> {
+  const orderTypes: Readonly<Record<string, "Pickup" | "DineIn">> = {
+    PICKUP: "Pickup",
+    DINE_IN: "DineIn",
+  };
+  const exponent = options.currencyMetadata.minorUnitExponent;
+  const decimal = (minor: bigint) => {
+    const negative = minor < 0n;
+    const digits = (negative ? -minor : minor).toString().padStart(exponent + 1, "0");
+    const whole = exponent === 0 ? digits : digits.slice(0, -exponent);
+    return (negative ? "-" : "") + whole + (exponent === 0 ? "" : "." + digits.slice(-exponent));
+  };
+  return Object.freeze({
+    async load(input) {
+      const orderType = orderTypes[input.orderTypeCode];
+      return options.transactions.run(async (tx) => {
+        const scope = {
+          brandReference: String(input.brandReference),
+          storeReference: String(input.storeReference),
+        };
+        const rules = await listStoreAvailabilityRules(tx, scope);
+        const assignment = await currentStorePriceBook(tx as never, scope);
+        const book =
+          assignment === null
+            ? null
+            : await createPostgresCurrentPriceBookStore(
+                { run: (work) => work(tx as never) },
+                { brandReference: scope.brandReference },
+                options.currencyMetadata,
+              ).load({
+                priceBookReference: assignment.priceBookReference,
+                observedAt: input.requestedAt,
+              });
+        const optionPriceStore = createPostgresCurrentOptionPriceStore(
+          { run: (work) => work(tx as never) },
+          scope,
+          options.currencyMetadata,
+        );
+        // WP-2423 item 8 ⑥ part 4: choices standing for a combo's dishes (guests choose them).
+        const comboChoices = new Set(
+          (await listBundleComboRecords(tx as never, scope)).choices.map((c) => c.optionReference),
+        );
+        // WP-2423 (cart-unsellable-dishes): the published choices not offered right now.
+        const brandOff = await notOfferedOptions(
+          tx,
+          scope.brandReference,
+          (input.options ?? []).map((option) => String(option.optionReference)),
+        );
+        // WP-2423 (M22, M24): the choices this Store cannot sell now — the same answer the cart,
+        // quote and checkout read (`listOptionsOffNow`), so the menu and the cart agree.
+        const offNow = await listOptionsOffNow(tx, {
+          ...scope,
+          channelCode: String(input.channelCode),
+          orderTypeCode: String(input.orderTypeCode),
+          observedAt: String(input.requestedAt),
+          optionReferences: (input.options ?? []).map((option) => String(option.optionReference)),
+        });
+        const soldOutOptions = new Set(
+          [...offNow].filter(([, why]) => why === "SoldOut").map(([option]) => option),
+        );
+        const notOffered = new Set([
+          ...brandOff,
+          ...[...offNow].filter(([, why]) => why === "NotOffered").map(([option]) => option),
+        ]);
+        const facts = new Map<string, CustomerMenuStoreFact>();
+        for (const sellable of input.sellableReferences) {
+          const own = rules.filter((rule) => rule.sellableReference === sellable);
+          const resolved = resolveStoreAvailability({
+            brandReference: parseCatalogReference(scope.brandReference),
+            storeReference: parseCatalogReference(scope.storeReference),
+            sellableReference: sellable,
+            channelCode: parseCatalogCode(input.channelCode),
+            orderTypeCode: parseCatalogCode(input.orderTypeCode),
+            at: parseCatalogInstant(input.requestedAt),
+            rules: own,
+            safetyEvidence: [],
+          });
+          const soldOut =
+            resolved.status === "Unavailable" &&
+            own.some(
+              (rule) =>
+                rule.ruleReference === resolved.ruleReference && rule.reasonCode === "SOLD_OUT",
+            );
+          let price: CustomerMenuStoreFact["price"] = null;
+          if (book !== null && orderType !== undefined)
+            try {
+              const found = resolvePrice(book, {
+                brandReference: scope.brandReference as never,
+                storeReference: scope.storeReference as never,
+                storeGroupReference: null,
+                regionReference: null,
+                sellableReference: sellable as never,
+                channelCode: options.priceChannelCode as never,
+                orderType,
+                currencyCode: options.currencyMetadata.currencyCode,
+                evaluatedAt: input.requestedAt,
+              });
+              price = {
+                amount: decimal(found.amount.amountMinor),
+                currency: found.amount.currencyCode,
+              };
+            } catch (error) {
+              // No price or an ambiguous one: shown as unpriced; the Quote refuses it the same way.
+              if (!(error instanceof PriceResolutionError)) throw error;
+            }
+          const optionPrices = new Map<string, { amount: string; currency: string }>();
+          if (orderType !== undefined)
+            for (const option of (input.options ?? []).filter(
+              (candidate) => candidate.sellableReference === sellable,
+            )) {
+              const rules = await optionPriceStore.load({
+                bindingReference: option.bindingReference,
+                optionReference: option.optionReference,
+                skuReference: sellable,
+                storeGroupReference: null,
+                regionReference: null,
+                channelCode: options.priceChannelCode,
+                orderType,
+                observedAt: input.requestedAt,
+              });
+              try {
+                const found = resolveOptionPrice(rules, {
+                  brandReference: scope.brandReference as never,
+                  storeReference: scope.storeReference as never,
+                  storeGroupReference: null,
+                  regionReference: null,
+                  bindingReference: option.bindingReference as never,
+                  optionReference: option.optionReference as never,
+                  skuReference: sellable as never,
+                  channelCode: options.priceChannelCode as never,
+                  orderType,
+                  currencyMetadata: options.currencyMetadata,
+                  selectedQuantity: 1,
+                  itemQuantity: 1,
+                  evaluatedAt: input.requestedAt,
+                });
+                optionPrices.set(option.bindingReference + ":" + option.optionReference, {
+                  amount: decimal(found.amount.amountMinor),
+                  currency: found.amount.currencyCode,
+                });
+              } catch (error) {
+                // No price or an ambiguous one: shown as unpriced; the Quote refuses it the same way.
+                if (!(error instanceof OptionPriceError)) throw error;
+              }
+            }
+          facts.set(sellable, {
+            availability:
+              resolved.status === "Available" ? "Available" : soldOut ? "SoldOut" : "NotOffered",
+            price,
+            optionPrices,
+            ...(comboChoices.size === 0 ? {} : { comboChoices }),
+            ...(notOffered.size === 0 ? {} : { notOfferedOptions: notOffered }),
+            ...(soldOutOptions.size === 0 ? {} : { soldOutOptions }),
+          });
+        }
+        // WP-2423 (M24): a dish whose required group the Store's sold-out marks emptied is sold
+        // out on the menu, as the cart says, not found out choice by choice inside the dish.
+        if (soldOutOptions.size > 0)
+          for (const item of input.items ?? []) {
+            const fact = facts.get(item.sellableReference);
+            if (
+              fact?.availability === "Available" &&
+              item.optionRules !== undefined &&
+              publishedRequiredGroupSoldOut(
+                item.optionRules,
+                String(input.channelCode),
+                soldOutOptions,
+                notOffered,
+              )
+            )
+              facts.set(item.sellableReference, { ...fact, availability: "SoldOut" });
+          }
+        // WP-2423 (M77, M167): a recipe bound or ended since this menu version was checked for
+        // listing changes what the dish contains now; guests read it with the listed allergens.
+        if (input.menuVersionReference !== undefined) {
+          const version = String(input.menuVersionReference);
+          const skus = [...facts.keys()];
+          for (let at = 0; at < skus.length; at += 200) {
+            const changes = await listSellableAllergenChangesSince(
+              tx as never,
+              scope,
+              skus.slice(at, at + 200).map((skuReference) => ({
+                menuVersionReference: version,
+                skuReference,
+              })),
+            );
+            for (const sku of skus.slice(at, at + 200)) {
+              const change = changes.get(sellableAllergenChangeKey(version, sku));
+              const fact = facts.get(sku);
+              if (change !== undefined && fact !== undefined)
+                facts.set(sku, { ...fact, allergenChange: change });
+            }
+          }
+        }
+        // WP-2423 DEC-ALCOHOL: where and when the dishes that contain alcohol can be ordered.
+        const alcohol = await readAlcoholSale(tx, scope, input.requestedAt, [...facts.keys()]);
+        for (const sellable of alcohol.skus) {
+          const fact = facts.get(sellable);
+          if (fact !== undefined) facts.set(sellable, alcoholMenuFact(fact, alcohol, orderType));
+        }
+        // Read last, so a failed stock read cannot disturb the Store's offers and prices above.
+        // One observation per shown item in this same read-only transaction (bounded by the
+        // evidence source); the cost grows with menu size, not with customers or stock history.
+        if (options.inventory !== undefined && input.items !== undefined) {
+          let stock: ReadonlyMap<string, unknown> = new Map();
+          try {
+            stock = await options.inventory.observe(tx as never, {
+              brandReference: scope.brandReference,
+              storeReference: scope.storeReference,
+              observedAt: String(input.requestedAt),
+              // Only items otherwise shown as available can become sold out from stock. An item
+              // whose default choice is off now is observed as guests can order it (WP-2423 M22).
+              items: input.items
+                .filter((item) => facts.get(item.sellableReference)?.availability === "Available")
+                .map((item) =>
+                  offNow.size === 0 && brandOff.size === 0
+                    ? item
+                    : {
+                        ...item,
+                        defaultOptionSelections:
+                          item.optionRules === undefined
+                            ? item.defaultOptionSelections
+                            : publishedDefaultOptionSelections(
+                                item.optionRules,
+                                String(input.channelCode),
+                                new Set([...offNow.keys(), ...brandOff]),
+                              ),
+                      },
+                ),
+            });
+          } catch {
+            // Unknown stock never hides or sells out an item; add-to-cart checks stock again.
+          }
+          for (const [sellable, fact] of facts) {
+            const observed = stock.get(sellable);
+            if (fact.availability !== "Available" || observed === undefined) continue;
+            try {
+              // Stock only narrows an offered item. Indeterminate evidence is not passed on: it
+              // would make Catalog treat the item as not offered and hide it.
+              const evidence = parseAvailabilitySafetyEvidence(observed);
+              if (
+                evidence.kind === "Inventory" &&
+                evidence.status === "Unavailable" &&
+                resolveStoreAvailability({
+                  brandReference: parseCatalogReference(scope.brandReference),
+                  storeReference: parseCatalogReference(scope.storeReference),
+                  sellableReference: parseCatalogReference(sellable),
+                  channelCode: parseCatalogCode(input.channelCode),
+                  orderTypeCode: parseCatalogCode(input.orderTypeCode),
+                  at: parseCatalogInstant(input.requestedAt),
+                  rules: rules.filter((rule) => rule.sellableReference === sellable),
+                  safetyEvidence: [evidence],
+                }).status === "Unavailable"
+              )
+                facts.set(sellable, { ...fact, availability: "SoldOut" });
+            } catch {
+              // Malformed evidence is unknown stock.
+            }
+          }
+        }
+        return facts;
+      });
+    },
+  });
+}
+
+/**
+ * WP-2423 (cart-unsellable-dishes): which of these options the Brand does not offer now (staff
+ * unticked them under Option sets, or removed them). Read under the Brand-only context, because
+ * Catalog rows are hidden while a Store is selected (the Store-selected RLS trap); the Store the
+ * menu read selected is restored afterwards, in the same transaction.
+ */
+async function notOfferedOptions(
+  tx: ProductLifecycleTransaction,
+  brandReference: string,
+  optionReferences: readonly string[],
+): Promise<ReadonlySet<string>> {
+  const wanted = [...new Set(optionReferences)];
+  if (wanted.length === 0) return new Set();
+  const query = tx.query.bind(tx) as (
+    sql: string,
+    values: readonly unknown[],
+  ) => Promise<{ rows: readonly Record<string, unknown>[] }>;
+  const before = await query(
+    "SELECT current_setting('bop.brand_id', true) AS brand, current_setting('bop.store_id', true) AS store",
+    [],
+  );
+  const store = before.rows[0]?.store;
+  const brand = before.rows[0]?.brand;
+  await query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id','',true)", [
+    brandReference,
+  ]);
+  try {
+    const result = await query(
+      "SELECT option_id::text AS option FROM rms_catalog.option WHERE brand_id=$1 AND option_id = ANY($2::uuid[]) AND lifecycle <> 'Active'",
+      [brandReference, wanted],
+    );
+    return new Set(result.rows.map((row) => String(row.option)));
+  } finally {
+    await query("SELECT set_config('bop.brand_id',$1,true),set_config('bop.store_id',$2,true)", [
+      typeof brand === "string" ? brand : "",
+      typeof store === "string" ? store : "",
+    ]);
+  }
+}

@@ -1,0 +1,987 @@
+import { expect, it, vi } from "vitest";
+import { createOrdinaryRefundClient, OrdinaryRefundClientError } from "./ordinary-refund-client";
+import { refundErrorText } from "./OrderPaymentLinks";
+const id = (n: number) => "01909974-0000-7000-8000-" + n.toString(16).padStart(12, "0");
+const csrf = "a".repeat(43);
+const command = () => ({
+  orderReference: id(1),
+  requestReference: id(2),
+  operationReference: id(3),
+  expectedClaimVersion: 0,
+  reasonCode: "CUSTOMER_REQUEST",
+  items: [{ orderBatchReference: id(4), orderItemReference: id(5), quantity: 1 }],
+});
+const preview = {
+  status: "Previewed",
+  requestReference: id(2),
+  operationReference: id(3),
+  claimVersion: 0,
+  currencyCode: "CAD",
+  amountMinor: "1130",
+  paymentAttemptReferences: [id(6)],
+  approvalRequired: false,
+  escalationReasons: [],
+  components: {
+    netAmountMinor: "1000",
+    taxAmountMinor: "130",
+    tipAmountMinor: "0",
+    serviceChargeAmountMinor: "0",
+    serviceChargeTaxAmountMinor: "0",
+  },
+};
+const recorded = {
+  status: "RequestRecorded",
+  requestReference: id(2),
+  operationReference: id(3),
+  claimVersion: 1,
+  currencyCode: "CAD",
+  amountMinor: "1130",
+  paymentAttemptReferences: [id(6)],
+  approvalRequired: false,
+  escalationReasons: [],
+  replayed: false,
+};
+const response = (value: unknown, status = 200) =>
+  new Response(JSON.stringify(value), {
+    status,
+    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+  });
+it("freezes nested selection and retries the exact request after response loss", async () => {
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(response(preview))
+    .mockRejectedValueOnce(new Error("lost"))
+    .mockResolvedValueOnce(response({ ...recorded, replayed: true }, 202));
+  const source = command(),
+    operation = createOrdinaryRefundClient(fetcher).prepareRequest(source);
+  source.items[0] = { orderBatchReference: id(99), orderItemReference: id(98), quantity: 99 };
+  await operation.preview(csrf);
+  await expect(operation.submit(csrf)).rejects.toMatchObject({ code: "OutcomeUnknown" });
+  await expect(operation.preview(csrf)).rejects.toMatchObject({ code: "Unavailable" });
+  await expect(operation.submit("b".repeat(43))).resolves.toEqual({
+    ...recorded,
+    replayed: true,
+    approveAlone: false,
+    // An older server says nothing of server preparation: nothing was prepared.
+    prepared: [],
+  });
+  for (const call of fetcher.mock.calls)
+    expect(JSON.parse(String(call[1]?.body))).toEqual(command());
+  expect(fetcher.mock.calls[2]?.[1]).toMatchObject({
+    credentials: "same-origin",
+    cache: "no-store",
+    redirect: "error",
+    headers: { "X-BOP-CSRF": "b".repeat(43) },
+  });
+});
+it("requires a validated preview before sending a request", async () => {
+  const fetcher = vi.fn<typeof fetch>(),
+    operation = createOrdinaryRefundClient(fetcher).prepareRequest(command());
+  await expect(operation.submit(csrf)).rejects.toMatchObject({ code: "Unavailable" });
+  expect(fetcher).not.toHaveBeenCalled();
+});
+it.each([
+  { ...preview, amountMinor: "1131" },
+  { ...preview, amountMinor: 1130 },
+  { ...preview, operationReference: id(99) },
+  { ...preview, claimVersion: 1 },
+  { ...preview, status: "Refunded" },
+  { ...preview, components: { ...preview.components, taxAmountMinor: "-130" } },
+])("rejects invalid money or intent binding %j", async (data) => {
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response(data)),
+    operation = createOrdinaryRefundClient(fetcher).prepareRequest(command());
+  await expect(operation.preview(csrf)).rejects.toMatchObject({ code: "Unavailable" });
+  await expect(operation.submit(csrf)).rejects.toThrow();
+  expect(fetcher).toHaveBeenCalledOnce();
+});
+it("keeps integer money exact beyond Number safe precision", async () => {
+  const huge = "9007199254740993",
+    fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      response({
+        ...preview,
+        amountMinor: huge,
+        components: { ...preview.components, netAmountMinor: huge, taxAmountMinor: "0" },
+      }),
+    );
+  await expect(
+    createOrdinaryRefundClient(fetcher).prepareRequest(command()).preview(csrf),
+  ).resolves.toMatchObject({ amountMinor: huge, components: { netAmountMinor: huge } });
+});
+it.each([
+  { ...recorded, amountMinor: "1131" },
+  { ...recorded, paymentAttemptReferences: [id(99)] },
+  { ...recorded, claimVersion: 2 },
+])("treats mismatched submission receipt as unknown %j", async (data) => {
+  const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(response(preview))
+      .mockResolvedValueOnce(response(data, 202)),
+    operation = createOrdinaryRefundClient(fetcher).prepareRequest(command());
+  await operation.preview(csrf);
+  await expect(operation.submit(csrf)).rejects.toMatchObject({ code: "OutcomeUnknown" });
+});
+it("rejects caller authority fields and duplicate item identity", () => {
+  const client = createOrdinaryRefundClient(vi.fn());
+  expect(() =>
+    client.prepareRequest({ ...command(), actorReference: id(99) } as ReturnType<typeof command>),
+  ).toThrow();
+  const value = command();
+  value.items.push({ orderBatchReference: id(7), orderItemReference: id(5), quantity: 1 });
+  expect(() => client.prepareRequest(value)).toThrow();
+});
+it("binds item queries to order and denies selectable units on uncaptured batches", async () => {
+  const item = {
+      orderBatchReference: id(4),
+      orderItemReference: id(5),
+      label: "Latte",
+      quantity: 2,
+      unclaimedQuantity: 1,
+      paymentCaptured: true,
+      refundedByCancellation: false,
+      paymentIntentReference: id(31),
+      paymentMethod: "Online",
+      kitchen: "Started",
+      withdrawnQuantity: 1,
+    },
+    data = {
+      orderReference: id(1),
+      orderNumber: "12",
+      canRequest: true,
+      canWithdraw: true,
+      claimVersion: 1,
+      recentRequests: [
+        {
+          requestReference: id(40),
+          operationReference: id(41),
+          claimVersion: 1,
+          requestedAt: "2026-09-20T12:00:00.000Z",
+          reasonCode: "CUSTOMER_REQUEST",
+          currencyCode: "CAD",
+          amountMinor: "1130",
+          decline: null,
+          progress: "Recorded",
+          paymentMethod: "Online",
+        },
+      ],
+      items: [item],
+    };
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(response(data))
+    .mockResolvedValueOnce(response({ ...data, items: [{ ...item, paymentCaptured: false }] }))
+    .mockResolvedValueOnce(response({ ...data, orderReference: id(99) }))
+    // WP-2423 M10: more withdrawn units than the line has, or a kitchen state it doesn't know.
+    .mockResolvedValueOnce(response({ ...data, items: [{ ...item, withdrawnQuantity: 3 }] }))
+    .mockResolvedValueOnce(response({ ...data, items: [{ ...item, kitchen: "Cooking" }] }));
+  const client = createOrdinaryRefundClient(fetcher);
+  await expect(client.items(id(1), csrf)).resolves.toEqual(data);
+  for (let i = 0; i < 4; i++)
+    await expect(client.items(id(1), csrf)).rejects.toMatchObject({ code: "Unavailable" });
+});
+// b13: a counter cash request carries the cash given back (or to give back), whole nickels.
+it("b13: a cash request in the refund list reads its cash given back, only on the card machine in whole nickels", async () => {
+  const entry = {
+    requestReference: id(40),
+    operationReference: id(41),
+    claimVersion: 1,
+    requestedAt: "2026-11-13T12:00:00.000Z",
+    reasonCode: "CUSTOMER_REQUEST",
+    currencyCode: "CAD",
+    amountMinor: "509",
+    decline: null,
+    progress: "Refunded",
+    paymentMethod: "CardMachine",
+  };
+  const data = (extra: Record<string, unknown>) => ({
+    orderReference: id(1),
+    orderNumber: "3",
+    canRequest: true,
+    canWithdraw: false,
+    claimVersion: 1,
+    recentRequests: [{ ...entry, ...extra }],
+    items: [],
+  });
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(response(data({ cashGivenBackMinor: "510" })))
+    .mockResolvedValueOnce(response(data({})))
+    .mockResolvedValueOnce(response(data({ cashGivenBackMinor: "509" })))
+    .mockResolvedValueOnce(response(data({ cashGivenBackMinor: "510", paymentMethod: "Online" })));
+  const client = createOrdinaryRefundClient(fetcher);
+  expect((await client.items(id(1), csrf)).recentRequests[0]?.cashGivenBackMinor).toBe("510");
+  expect((await client.items(id(1), csrf)).recentRequests[0]?.cashGivenBackMinor).toBeUndefined();
+  for (let i = 0; i < 2; i++) await expect(client.items(id(1), csrf)).rejects.toThrow();
+});
+it("WP-2423 M10: an older server's items read as not known and not withdrawable; stop making it too is sent for refunded units only", async () => {
+  const older = {
+    orderReference: id(1),
+    orderNumber: "12",
+    canRequest: true,
+    claimVersion: 0,
+    recentRequests: [],
+    items: [
+      {
+        orderBatchReference: id(4),
+        orderItemReference: id(5),
+        label: "Latte",
+        quantity: 2,
+        unclaimedQuantity: 2,
+        paymentCaptured: true,
+        refundedByCancellation: false,
+        paymentIntentReference: id(31),
+        paymentMethod: "Online",
+      },
+    ],
+  };
+  const read = await createOrdinaryRefundClient(
+    vi.fn<typeof fetch>().mockResolvedValueOnce(response(older)),
+  ).items(id(1), csrf);
+  expect(read.canWithdraw).toBe(false);
+  expect(read.items[0]).toMatchObject({ kitchen: null, withdrawnQuantity: 0 });
+  const refunded = command().items[0];
+  if (refunded === undefined) throw new Error("fixture");
+  const client = createOrdinaryRefundClient(vi.fn<typeof fetch>());
+  expect(() =>
+    client.prepareRequest({
+      ...command(),
+      withdraw: [{ orderItemReference: id(77), quantity: 1 }],
+    }),
+  ).toThrow();
+  expect(() =>
+    client.prepareRequest({
+      ...command(),
+      withdraw: [
+        { orderItemReference: refunded.orderItemReference, quantity: refunded.quantity + 1 },
+      ],
+    }),
+  ).toThrow();
+  const sending = vi.fn<typeof fetch>().mockResolvedValueOnce(response(preview));
+  await createOrdinaryRefundClient(sending)
+    .prepareRequest({
+      ...command(),
+      withdraw: [{ orderItemReference: refunded.orderItemReference, quantity: refunded.quantity }],
+    })
+    .preview(csrf);
+  expect(JSON.parse(String(sending.mock.calls[0]?.[1]?.body)).withdraw).toEqual([
+    { orderItemReference: refunded.orderItemReference, quantity: refunded.quantity },
+  ]);
+});
+
+it("v15 2026-10-18: a read that changed while loading is read once more, never shown as a refusal", async () => {
+  const data = {
+    orderReference: id(1),
+    orderNumber: "40",
+    canRequest: false,
+    claimVersion: 0,
+    recentRequests: [],
+    items: [],
+  };
+  const answer = { ...data, canWithdraw: false };
+  const changed = () => response({ error: "changed_while_loading" }, 409);
+  const busy = () => response({ error: "retry_later" }, 503);
+  // Changed once: read again at once, and the latest is shown.
+  let fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(changed())
+    .mockResolvedValueOnce(response(data));
+  await expect(createOrdinaryRefundClient(fetcher).items(id(1), csrf)).resolves.toEqual(answer);
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  // Busy once: read again after a pause.
+  fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(busy())
+    .mockResolvedValueOnce(response(data));
+  await expect(createOrdinaryRefundClient(fetcher).items(id(1), csrf)).resolves.toEqual(answer);
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  // Still changing: one retry only, then "changed" (not "Denied").
+  fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(changed()).mockResolvedValueOnce(changed());
+  await expect(createOrdinaryRefundClient(fetcher).items(id(1), csrf)).rejects.toMatchObject({
+    code: "Changed",
+  });
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  // A refusal is not retried.
+  fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(response({ error: "request_denied" }, 403));
+  await expect(createOrdinaryRefundClient(fetcher).items(id(1), csrf)).rejects.toMatchObject({
+    code: "Denied",
+  });
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  // Staff read what happened in plain words, never a permission refusal.
+  expect(refundErrorText(new OrdinaryRefundClientError("Changed"))).toBe(
+    "This order changed while it was loading. Refresh to see the latest.",
+  );
+  expect(refundErrorText(new OrdinaryRefundClientError("Changed"))).not.toMatch(/permission/iu);
+  // A command is never resent by the client.
+  fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(response(preview))
+    .mockResolvedValueOnce(busy());
+  const operation = createOrdinaryRefundClient(fetcher).prepareRequest(command());
+  await operation.preview(csrf);
+  await expect(operation.submit(csrf)).rejects.toMatchObject({ code: "OutcomeUnknown" });
+  expect(fetcher).toHaveBeenCalledTimes(2);
+});
+
+const context = {
+  paymentIntentReference: id(6),
+  paymentAttemptReference: id(7),
+  orderReference: id(1),
+  orderBatchReference: id(4),
+  observedAt: "2026-09-20T12:00:00.000Z",
+  paymentState: "Captured",
+  paymentMethod: "Online",
+  paidInCash: false,
+  cashLeftMinor: null,
+  cashGivenBackMinor: null as string | null,
+  currencyCode: "CAD",
+  capturedAmountMinor: "2260",
+  confirmedRefundMinor: "0",
+  pendingRefundMinor: "1130",
+  canRequest: true,
+  requestBlocked: null,
+  canSend: true,
+  canRecover: false,
+  recoveries: [],
+  cashTakeBackLeftMinor: null,
+  recoveryUnreadable: false,
+};
+it("WP-2423 M14: a cashier's context says they request but do not send; an older server's means whoever requests sends", async () => {
+  const older: Partial<typeof context> = { ...context };
+  delete older.canSend;
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(response({ ...context, canSend: false }))
+    .mockResolvedValueOnce(response(older))
+    .mockResolvedValueOnce(response({ ...context, canSend: "yes" }));
+  const client = createOrdinaryRefundClient(fetcher);
+  await expect(client.context(id(6), csrf)).resolves.toMatchObject({
+    canRequest: true,
+    canSend: false,
+  });
+  await expect(client.context(id(6), csrf)).resolves.toMatchObject({ canSend: true });
+  await expect(client.context(id(6), csrf)).rejects.toThrow();
+});
+it("payment context preserves separate capture, confirmed and pending amounts", async () => {
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response(context));
+  await expect(createOrdinaryRefundClient(fetcher).context(id(6), csrf)).resolves.toEqual(context);
+});
+it("M126 I.5: another store's payment is NotFound, a role without refunds Denied, once each", async () => {
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(response({ error: "refund_payment_not_found" }, 404))
+    .mockResolvedValueOnce(response({ error: "request_denied" }, 403))
+    .mockResolvedValueOnce(response({ error: "not_found" }, 404));
+  const client = createOrdinaryRefundClient(fetcher);
+  await expect(client.context(id(6), csrf)).rejects.toMatchObject({ code: "NotFound" });
+  await expect(client.context(id(6), csrf)).rejects.toMatchObject({ code: "Denied" });
+  // Any other 404 (not this route's answer) is no claim about the payment.
+  await expect(client.context(id(6), csrf)).rejects.toMatchObject({ code: "Unavailable" });
+  expect(fetcher).toHaveBeenCalledTimes(3);
+});
+it("WP-2423 M13: reads why an owner may not record, and an older server's answer as no reason", async () => {
+  const older: Record<string, unknown> = { ...context };
+  delete older.requestBlocked;
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(
+      response({ ...context, canRequest: false, requestBlocked: "SoleOperatorOff" }),
+    )
+    .mockResolvedValueOnce(response(older))
+    .mockResolvedValueOnce(response({ ...context, requestBlocked: "Other" }));
+  const client = createOrdinaryRefundClient(fetcher);
+  await expect(client.context(id(6), csrf)).resolves.toMatchObject({
+    canRequest: false,
+    requestBlocked: "SoleOperatorOff",
+  });
+  await expect(client.context(id(6), csrf)).resolves.toEqual(context);
+  await expect(client.context(id(6), csrf)).rejects.toThrow();
+});
+it("payment context preserves unknown amounts rather than inventing zero", async () => {
+  const unknown = {
+    ...context,
+    paymentState: "Unresolved",
+    currencyCode: null,
+    capturedAmountMinor: null,
+    confirmedRefundMinor: null,
+    pendingRefundMinor: null,
+  };
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(response(unknown))
+    .mockResolvedValueOnce(response({ ...unknown, capturedAmountMinor: "0" }));
+  const client = createOrdinaryRefundClient(fetcher);
+  await expect(client.context(id(6), csrf)).resolves.toEqual(unknown);
+  await expect(client.context(id(6), csrf)).rejects.toThrow();
+});
+it("v15 batch 8: reads a counter cash payment, and an older server's answer as not cash", async () => {
+  const machine = { ...context, paymentMethod: "CardMachine" };
+  const older: Record<string, unknown> = { ...machine };
+  delete older.paidInCash;
+  delete older.cashLeftMinor;
+  const noLeft: Record<string, unknown> = { ...machine, paidInCash: true };
+  delete noLeft.cashLeftMinor;
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(response({ ...machine, paidInCash: true, cashLeftMinor: "1075" }))
+    .mockResolvedValueOnce(response(older))
+    // A server before the drawer's cash was read: cash, without a cap.
+    .mockResolvedValueOnce(response(noLeft))
+    // Cash is only ever a payment taken at the counter, and the answer is a yes or no.
+    .mockResolvedValueOnce(response({ ...context, paidInCash: true }))
+    .mockResolvedValueOnce(response({ ...machine, paidInCash: "yes" }))
+    // The drawer's cash is only a cash payment's, and is a whole amount in cents.
+    .mockResolvedValueOnce(response({ ...machine, paidInCash: false, cashLeftMinor: "100" }))
+    .mockResolvedValueOnce(response({ ...machine, paidInCash: true, cashLeftMinor: "-5" }));
+  const client = createOrdinaryRefundClient(fetcher);
+  await expect(client.context(id(6), csrf)).resolves.toMatchObject({
+    paidInCash: true,
+    cashLeftMinor: "1075",
+  });
+  await expect(client.context(id(6), csrf)).resolves.toMatchObject({
+    paidInCash: false,
+    cashLeftMinor: null,
+  });
+  await expect(client.context(id(6), csrf)).resolves.toMatchObject({
+    paidInCash: true,
+    cashLeftMinor: null,
+  });
+  for (let n = 0; n < 4; n += 1) await expect(client.context(id(6), csrf)).rejects.toThrow();
+});
+// b13: the cash a cash payment's refunds gave back from the drawer, said beside "Refunded".
+it("b13: reads the cash given back for a cash payment, whole nickels only, and none from an older server", async () => {
+  const cash = { ...context, paymentMethod: "CardMachine", paidInCash: true, cashLeftMinor: "0" };
+  const older: Record<string, unknown> = { ...cash };
+  delete older.cashGivenBackMinor;
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(response({ ...cash, cashGivenBackMinor: "510" }))
+    .mockResolvedValueOnce(response(older))
+    .mockResolvedValueOnce(response({ ...cash, cashGivenBackMinor: "509" }))
+    .mockResolvedValueOnce(response({ ...context, cashGivenBackMinor: "510" }));
+  const client = createOrdinaryRefundClient(fetcher);
+  await expect(client.context(id(6), csrf)).resolves.toMatchObject({ cashGivenBackMinor: "510" });
+  await expect(client.context(id(6), csrf)).resolves.toMatchObject({ cashGivenBackMinor: null });
+  for (let n = 0; n < 2; n += 1) await expect(client.context(id(6), csrf)).rejects.toThrow();
+});
+// b10 cash-refund-approvals: money taken back on an order paid only in cash, as the server says.
+it("b10: reads the cash a guest can still hand back, only for a cash payment in whole nickels", async () => {
+  const cash = { ...context, paymentMethod: "CardMachine", paidInCash: true, cashLeftMinor: "0" };
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(response({ ...cash, cashTakeBackLeftMinor: "2245" }))
+    .mockResolvedValueOnce(response(cash))
+    .mockResolvedValueOnce(response({ ...cash, cashTakeBackLeftMinor: "2243" }))
+    .mockResolvedValueOnce(response({ ...cash, paidInCash: false, cashTakeBackLeftMinor: "5" }));
+  const client = createOrdinaryRefundClient(fetcher);
+  await expect(client.context(id(6), csrf)).resolves.toMatchObject({
+    cashTakeBackLeftMinor: "2245",
+  });
+  // An older server: not said, so the page keeps the confirmed refunds as its limit.
+  await expect(client.context(id(6), csrf)).resolves.toMatchObject({
+    cashTakeBackLeftMinor: null,
+  });
+  for (let n = 0; n < 2; n += 1) await expect(client.context(id(6), csrf)).rejects.toThrow();
+});
+// b10: money taken back that could not be read is an outage, never "nothing to take back".
+it("b10: reads that money taken back could not be loaded, and an older server as loaded", async () => {
+  const older: Partial<typeof context> = { ...context };
+  delete older.recoveryUnreadable;
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(response({ ...context, recoveryUnreadable: true }))
+    .mockResolvedValueOnce(response(older))
+    .mockResolvedValueOnce(response({ ...context, recoveryUnreadable: "yes" }));
+  const client = createOrdinaryRefundClient(fetcher);
+  await expect(client.context(id(6), csrf)).resolves.toMatchObject({ recoveryUnreadable: true });
+  await expect(client.context(id(6), csrf)).resolves.toMatchObject({ recoveryUnreadable: false });
+  await expect(client.context(id(6), csrf)).rejects.toThrow();
+});
+it.each([
+  { ...context, paymentIntentReference: id(99) },
+  { ...context, confirmedRefundMinor: "2260" },
+  { ...context, capturedAmountMinor: 2260 },
+])("payment context rejects identity or money mismatch %#", async (data) => {
+  const client = createOrdinaryRefundClient(
+    vi.fn<typeof fetch>().mockResolvedValue(response(data)),
+  );
+  await expect(client.context(id(6), csrf)).rejects.toMatchObject({ code: "Unavailable" });
+});
+
+it("rejects missing, duplicate or inconsistent persisted request history", async () => {
+  const entry = {
+    requestReference: id(40),
+    operationReference: id(41),
+    claimVersion: 1,
+    requestedAt: "2026-09-20T12:00:00.000Z",
+    reasonCode: "CUSTOMER_REQUEST",
+    currencyCode: "CAD",
+    amountMinor: "1130",
+    decline: null,
+    progress: "Recorded",
+    paymentMethod: "Online",
+  };
+  const data = {
+    orderReference: id(1),
+    orderNumber: "12",
+    canRequest: true,
+    claimVersion: 1,
+    items: [],
+    recentRequests: [entry],
+  };
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(response(data));
+  const client = createOrdinaryRefundClient(fetcher);
+  expect((await client.items(id(1), csrf)).recentRequests).toEqual([entry]);
+  for (const invalid of [
+    [],
+    [{ ...entry, claimVersion: 2 }],
+    [{ ...entry, currencyCode: "USD" }],
+    [{ ...entry, amountMinor: "0" }],
+    [{ ...entry, requestedAt: "yesterday" }],
+    [{ ...entry, actorReference: id(99) }],
+  ]) {
+    fetcher.mockResolvedValueOnce(response({ ...data, recentRequests: invalid }));
+    await expect(client.items(id(1), csrf)).rejects.toMatchObject({ code: "Unavailable" });
+  }
+  fetcher.mockResolvedValueOnce(
+    response({ ...data, claimVersion: 2, recentRequests: [entry, { ...entry, claimVersion: 2 }] }),
+  );
+  await expect(client.items(id(1), csrf)).rejects.toMatchObject({ code: "Unavailable" });
+});
+
+it("binds status to request operation and rejects contradictory completion or money", async () => {
+  const payment = {
+    paymentAttemptReference: id(7),
+    paymentIntentReference: id(6),
+    state: "NotDispatched",
+    method: "Online",
+    refundedOnCardMachineAt: null,
+    cardMachineSlipReference: null,
+    executionOperationReference: null,
+    executionApprovalReference: null,
+    amountMinor: "1130",
+    confirmedMinor: "0",
+    pendingMinor: "1130",
+  };
+  const data = {
+    orderReference: id(1),
+    requestReference: id(2),
+    operationReference: id(3),
+    observedAt: "2026-09-20T12:00:00.000Z",
+    currencyCode: "CAD",
+    amountMinor: "1130",
+    payments: [payment],
+  };
+  const fetcher = vi.fn<typeof fetch>();
+  const client = createOrdinaryRefundClient(fetcher);
+  for (const state of ["NotDispatched", "Prepared", "NeedsReconciliation", "Confirmed"]) {
+    const value = {
+      ...data,
+      payments: [
+        {
+          ...payment,
+          state,
+          executionOperationReference: state === "NotDispatched" ? null : id(40),
+          confirmedMinor: state === "Confirmed" ? "1130" : "0",
+          pendingMinor: state === "Confirmed" ? "0" : "1130",
+        },
+      ],
+    };
+    fetcher.mockResolvedValueOnce(response(value));
+    await expect(client.status(id(1), id(3), csrf)).resolves.toEqual(value);
+  }
+  for (const invalid of [
+    { ...data, operationReference: id(99) },
+    { ...data, orderReference: id(99) },
+    { ...data, amountMinor: "1131" },
+    { ...data, payments: [{ ...payment, state: "Confirmed" }] },
+    { ...data, payments: [{ ...payment, state: "Failed", pendingMinor: "0" }] },
+    { ...data, payments: [{ ...payment, providerRefundReference: "private" }] },
+  ]) {
+    fetcher.mockResolvedValueOnce(response(invalid));
+    await expect(client.status(id(1), id(3), csrf)).rejects.toMatchObject({ code: "Unavailable" });
+  }
+});
+
+it("WP-2423 Q5: reports why an owner approval is needed and rejects contradictory reasons", async () => {
+  const escalated = {
+    ...preview,
+    approvalRequired: true,
+    escalationReasons: ["OrderOrdinaryTotalAboveCad100", "MoreThan24Hours"],
+  };
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(response(escalated));
+  await expect(
+    createOrdinaryRefundClient(fetcher).prepareRequest(command()).preview(csrf),
+  ).resolves.toMatchObject({
+    approvalRequired: true,
+    escalationReasons: ["OrderOrdinaryTotalAboveCad100", "MoreThan24Hours"],
+  });
+  for (const invalid of [
+    { ...preview, approvalRequired: true, escalationReasons: [] },
+    { ...preview, approvalRequired: false, escalationReasons: ["MoreThan24Hours"] },
+    { ...preview, approvalRequired: true, escalationReasons: ["Unknown"] },
+    { ...preview, approvalRequired: "yes" },
+  ]) {
+    const failing = vi.fn<typeof fetch>().mockResolvedValueOnce(response(invalid));
+    await expect(
+      createOrdinaryRefundClient(failing).prepareRequest(command()).preview(csrf),
+    ).rejects.toMatchObject({ code: "Unavailable" });
+  }
+});
+
+it("WP-2423 Q19: says when the requester may approve the escalated refund alone", async () => {
+  const escalated = {
+    ...preview,
+    approvalRequired: true,
+    escalationReasons: ["MoreThan24Hours"],
+  };
+  const alone = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(response({ ...escalated, approveAlone: true }));
+  await expect(
+    createOrdinaryRefundClient(alone).prepareRequest(command()).preview(csrf),
+  ).resolves.toMatchObject({ approvalRequired: true, approveAlone: true });
+  const older = vi.fn<typeof fetch>().mockResolvedValueOnce(response(escalated));
+  await expect(
+    createOrdinaryRefundClient(older).prepareRequest(command()).preview(csrf),
+  ).resolves.toMatchObject({ approveAlone: false });
+  const invalid = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(response({ ...escalated, approveAlone: "yes" }));
+  await expect(
+    createOrdinaryRefundClient(invalid).prepareRequest(command()).preview(csrf),
+  ).rejects.toMatchObject({ code: "Unavailable" });
+});
+
+it("WP-2423 Q5: shows a declined request and sends an Other note only with that reason", async () => {
+  const entry = {
+    requestReference: id(40),
+    operationReference: id(41),
+    claimVersion: 1,
+    requestedAt: "2026-09-20T12:00:00.000Z",
+    reasonCode: "OTHER",
+    currencyCode: "CAD",
+    amountMinor: "1130",
+    decline: {
+      reasonCode: "ENTERED_IN_ERROR",
+      declinedAt: "2026-09-20T12:05:00.000Z",
+      declinerName: "Sam",
+      declinedByYou: false,
+    },
+    progress: "Declined",
+    paymentMethod: "Online",
+  };
+  const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(
+    response({
+      orderReference: id(1),
+      orderNumber: "12",
+      canRequest: true,
+      claimVersion: 1,
+      recentRequests: [entry],
+      items: [],
+    }),
+  );
+  expect((await createOrdinaryRefundClient(fetcher).items(id(1), csrf)).recentRequests).toEqual([
+    entry,
+  ]);
+  const client = createOrdinaryRefundClient(vi.fn<typeof fetch>());
+  expect(() => client.prepareRequest({ ...command(), reasonCode: "OTHER" })).toThrow();
+  expect(() => client.prepareRequest({ ...command(), note: "Not allowed" })).toThrow();
+  const sending = vi.fn<typeof fetch>().mockResolvedValueOnce(response(preview));
+  await createOrdinaryRefundClient(sending)
+    .prepareRequest({ ...command(), reasonCode: "OTHER", note: "  Customer left early " })
+    .preview(csrf);
+  expect(JSON.parse(String(sending.mock.calls[0]?.[1]?.body))).toMatchObject({
+    reasonCode: "OTHER",
+    note: "Customer left early",
+  });
+});
+
+it("WP-2423 Q5: reads each request's progress and who may record requests", async () => {
+  const base = {
+    requestReference: id(40),
+    operationReference: id(41),
+    claimVersion: 1,
+    requestedAt: "2026-09-20T12:00:00.000Z",
+    reasonCode: "WRONG_ITEM",
+    currencyCode: "CAD",
+    amountMinor: "1130",
+    decline: null,
+    paymentMethod: "Online",
+  };
+  const items = (entry: unknown, canRequest: unknown = false) =>
+    response({
+      orderReference: id(1),
+      orderNumber: "12",
+      canRequest,
+      claimVersion: 1,
+      recentRequests: [entry],
+      items: [],
+    });
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(items({ ...base, progress: "Refunded" }))
+    .mockResolvedValueOnce(items({ ...base, progress: "Declined" }))
+    .mockResolvedValueOnce(items({ ...base, progress: "Done" }))
+    .mockResolvedValueOnce(items({ ...base, progress: "Sending" }, "yes"))
+    // WP-2423 item 6: prepared but not sent yet is its own progress.
+    .mockResolvedValueOnce(items({ ...base, progress: "ReadyToSend" }));
+  const client = createOrdinaryRefundClient(fetcher);
+  const read = await client.items(id(1), csrf);
+  expect(read.canRequest).toBe(false);
+  expect(read.recentRequests[0]?.progress).toBe("Refunded");
+  for (let i = 0; i < 3; i++)
+    await expect(client.items(id(1), csrf)).rejects.toMatchObject({ code: "Unavailable" });
+  expect((await client.items(id(1), csrf)).recentRequests[0]?.progress).toBe("ReadyToSend");
+});
+it("WP-2423: a PIN sign-in refusal asks to confirm it is them; a plain 403 stays denied", async () => {
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(response(preview))
+    .mockResolvedValueOnce(response({ error: "full_sign_in_required" }, 403))
+    .mockResolvedValueOnce(response({ error: "forbidden" }, 403))
+    .mockResolvedValueOnce(response(recorded, 202));
+  const operation = createOrdinaryRefundClient(fetcher).prepareRequest(command());
+  await operation.preview(csrf);
+  await expect(operation.submit(csrf)).rejects.toMatchObject({ code: "FullSignInRequired" });
+  await expect(operation.submit(csrf)).rejects.toMatchObject({ code: "Denied" });
+  // After confirming, the same request is retried and recorded once.
+  await expect(operation.submit(csrf)).resolves.toMatchObject({ status: "RequestRecorded" });
+  expect(new Set(fetcher.mock.calls.slice(1).map((call) => call[1]?.body)).size).toBe(1);
+});
+
+it("WP-2423 item 4: reads card-machine payments, items, request status and records the machine refund", async () => {
+  const machineContext = { ...context, paymentMethod: "CardMachine" };
+  const payment = {
+    paymentAttemptReference: id(7),
+    paymentIntentReference: id(6),
+    state: "Confirmed",
+    method: "CardMachine",
+    refundedOnCardMachineAt: "2026-09-20T12:10:00.000Z",
+    cardMachineSlipReference: "AUTH 1234",
+    executionOperationReference: null,
+    executionApprovalReference: null,
+    amountMinor: "565",
+    confirmedMinor: "565",
+    pendingMinor: "0",
+  };
+  const status = {
+    orderReference: id(1),
+    requestReference: id(2),
+    operationReference: id(3),
+    observedAt: "2026-09-20T12:11:00.000Z",
+    currencyCode: "CAD",
+    amountMinor: "565",
+    payments: [payment],
+  };
+  const recorded = {
+    status: "Recorded",
+    orderReference: id(1),
+    requestReference: id(2),
+    amountMinor: "565",
+    refundedAt: "2026-09-20T12:10:00.000Z",
+    receipt: "NoDigitalReceipt",
+  };
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(response(machineContext))
+    // A card-machine payment that is not taken is never shown.
+    .mockResolvedValueOnce(response({ ...machineContext, paymentState: "Unresolved" }))
+    .mockResolvedValueOnce(response(status))
+    // A card-machine refund is never prepared or sent.
+    .mockResolvedValueOnce(
+      response({
+        ...status,
+        payments: [{ ...payment, state: "Prepared", executionOperationReference: id(9) }],
+      }),
+    )
+    .mockResolvedValueOnce(response(recorded))
+    .mockResolvedValueOnce(response({ error: "approval_required" }, 409));
+  const client = createOrdinaryRefundClient(fetcher);
+  expect((await client.context(id(6), csrf)).paymentMethod).toBe("CardMachine");
+  await expect(client.context(id(6), csrf)).rejects.toMatchObject({ code: "Unavailable" });
+  const read = await client.status(id(1), id(3), csrf);
+  expect(read.payments[0]).toMatchObject({
+    method: "CardMachine",
+    state: "Confirmed",
+    refundedOnCardMachineAt: "2026-09-20T12:10:00.000Z",
+    cardMachineSlipReference: "AUTH 1234",
+  });
+  await expect(client.status(id(1), id(3), csrf)).rejects.toMatchObject({ code: "Unavailable" });
+  const command = {
+    operationReference: id(10),
+    orderReference: id(1),
+    requestReference: id(2),
+    slipReference: "AUTH 1234",
+    refundedAt: null,
+  };
+  await expect(client.recordCardMachineRefund(command, csrf)).resolves.toEqual({
+    status: "Recorded",
+    amountMinor: "565",
+    refundedAt: "2026-09-20T12:10:00.000Z",
+    receipt: "NoDigitalReceipt",
+  });
+  expect(fetcher.mock.calls[4]?.[0]).toBe("/merchant/payments/refunds/card-machine-record");
+  expect(JSON.parse(String(fetcher.mock.calls[4]?.[1]?.body))).toEqual(command);
+  await expect(client.recordCardMachineRefund(command, csrf)).rejects.toMatchObject({
+    code: "Conflict",
+  });
+  // A card number is never sent as the slip reference.
+  await expect(
+    client.recordCardMachineRefund({ ...command, slipReference: "4111 1111 1111 1111" }, csrf),
+  ).rejects.toThrow();
+  expect(fetcher).toHaveBeenCalledTimes(6);
+});
+
+it("WP-2423 item 4: shows a recorded card-machine slip reference, never a card number or one not yet recorded", async () => {
+  const payment = {
+    paymentAttemptReference: id(7),
+    paymentIntentReference: id(6),
+    state: "Confirmed",
+    method: "CardMachine",
+    refundedOnCardMachineAt: "2026-09-20T12:10:00.000Z",
+    cardMachineSlipReference: null,
+    executionOperationReference: null,
+    executionApprovalReference: null,
+    amountMinor: "565",
+    confirmedMinor: "565",
+    pendingMinor: "0",
+  };
+  const status = (entry: Record<string, unknown>) => ({
+    orderReference: id(1),
+    requestReference: id(2),
+    operationReference: id(3),
+    observedAt: "2026-09-20T12:11:00.000Z",
+    currencyCode: "CAD",
+    amountMinor: "565",
+    payments: [{ ...payment, ...entry }],
+  });
+  const fetcher = vi.fn<typeof fetch>();
+  const client = createOrdinaryRefundClient(fetcher);
+  // Recorded without a slip reference (it is optional).
+  fetcher.mockResolvedValueOnce(response(status({})));
+  expect(
+    (await client.status(id(1), id(3), csrf)).payments[0]?.cardMachineSlipReference,
+  ).toBeNull();
+  for (const invalid of [
+    { cardMachineSlipReference: "4111 1111 1111 1111" },
+    { cardMachineSlipReference: "" },
+    { cardMachineSlipReference: 1234 },
+    {
+      state: "NotDispatched",
+      refundedOnCardMachineAt: null,
+      confirmedMinor: "0",
+      pendingMinor: "565",
+      cardMachineSlipReference: "AUTH 1234",
+    },
+    {
+      method: "Online",
+      state: "NotDispatched",
+      refundedOnCardMachineAt: null,
+      confirmedMinor: "0",
+      pendingMinor: "565",
+      cardMachineSlipReference: "AUTH 1234",
+    },
+  ]) {
+    fetcher.mockResolvedValueOnce(response(status(invalid)));
+    await expect(client.status(id(1), id(3), csrf)).rejects.toMatchObject({ code: "Unavailable" });
+  }
+  const missing: Partial<typeof payment> = { ...payment };
+  delete missing.cardMachineSlipReference;
+  fetcher.mockResolvedValueOnce(response({ ...status({}), payments: [missing] }));
+  await expect(client.status(id(1), id(3), csrf)).rejects.toMatchObject({ code: "Unavailable" });
+});
+
+it("WP-2423 M10: a full refund of an order nobody accepted is told to use Refuse and refund, the control a manager has", async () => {
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValue(response({ error: "refund_order_not_accepted" }, 409));
+  const error = await createOrdinaryRefundClient(fetcher)
+    .prepareRequest(command())
+    .preview(csrf)
+    .catch((e: unknown) => e);
+  expect(error).toMatchObject({ code: "OrderNotAccepted" });
+  expect(refundErrorText(error)).toBe(
+    "This order hasn't been accepted. Use Refuse and refund on the order to refund it in full.",
+  );
+  // v15 batch 5: a cashier has no Refuse and refund; whoever may accept has Can't make it.
+  const cashier = refundErrorText(error, false);
+  expect(cashier).not.toContain("Refuse and refund");
+  expect(cashier).toContain("Can't make it");
+  expect(cashier).toContain("Nothing was recorded.");
+});
+
+it("WP-2423 M10: stop making it too that can't be done as asked says why and that nothing was recorded", async () => {
+  for (const [answer, code, text] of [
+    ["refund_withdraw_needs_approval", "WithdrawNeedsApproval", "owner's approval"],
+    ["refund_withdraw_handed_over", "WithdrawHandedOver", "already handed over"],
+    ["refund_withdraw_everything", "WithdrawEverything", "Cancel order"],
+    ["refund_withdraw_kitchen_changed", "WithdrawKitchenChanged", "just started"],
+    ["refund_withdraw_needs_sender", "WithdrawNeedsSender", "A manager sends this refund"],
+    ["refund_withdraw_stock_not_releasable", "WithdrawStockNotReleasable", "stock"],
+    // WP-2423 M52/M131: a cash refund under 3 cents.
+    ["refund_cash_under_nickel", "CashUnderNickel", "under 3 cents"],
+  ] as const) {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(response(preview))
+      .mockResolvedValueOnce(response({ error: answer }, 409));
+    const operation = createOrdinaryRefundClient(fetcher).prepareRequest(command());
+    await operation.preview(csrf);
+    const error = await operation.submit(csrf).catch((e: unknown) => e);
+    // A refusal, never "couldn't confirm, press again" (nothing was recorded).
+    expect(error).toMatchObject({ code });
+    expect(refundErrorText(error)).toContain("Nothing was recorded.");
+    expect(refundErrorText(error)).toContain(text);
+  }
+});
+
+it("WP-2423 M163: money taken back is read with the payment, and recorded once per operation", async () => {
+  const recovery = {
+    recoveryReference: id(70),
+    method: "Cash",
+    amountMinor: "500",
+    currencyCode: "CAD",
+    reasonCode: "REFUNDED_TOO_MUCH",
+    businessDate: "2026-11-10",
+    recordedAt: "2026-11-10T12:00:00.000Z",
+    recordedByName: "Sam",
+  };
+  const read = await createOrdinaryRefundClient(
+    vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(response({ ...context, canRecover: true, recoveries: [recovery] })),
+  ).context(id(6), csrf);
+  expect(read).toMatchObject({ canRecover: true, recoveries: [recovery] });
+  const command = {
+    orderReference: id(1),
+    operationReference: id(71),
+    method: "Cash" as const,
+    amountMinor: "500",
+    reasonCode: "REFUNDED_TOO_MUCH" as const,
+  };
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(response({ status: "Recorded", orderReference: id(1), recovery }))
+    .mockResolvedValueOnce(response({ error: "recovery_above_refunded" }, 409))
+    .mockResolvedValueOnce(response({ error: "recovery_conflict" }, 409))
+    .mockResolvedValueOnce(response({ error: "recovery_cash_only" }, 422))
+    .mockResolvedValueOnce(response({ error: "recovery_whole_nickels" }, 422));
+  const client = createOrdinaryRefundClient(fetcher);
+  await expect(client.recover(command, csrf)).resolves.toMatchObject({ status: "Recorded" });
+  expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual(command);
+  await expect(client.recover(command, csrf)).rejects.toMatchObject({
+    code: "RecoveryAboveRefunded",
+  });
+  // The same attempt recorded with other details is named, not an unknown result.
+  await expect(client.recover(command, csrf)).rejects.toMatchObject({ code: "RecoveryConflict" });
+  // b12: a cash order's take-back refused for its method or odd cents says so (never "denied").
+  await expect(client.recover(command, csrf)).rejects.toMatchObject({ code: "RecoveryCashOnly" });
+  await expect(client.recover(command, csrf)).rejects.toMatchObject({
+    code: "RecoveryWholeNickels",
+  });
+  // A card-machine recovery needs its slip; too many digits (a card number) never leave here.
+  await expect(client.recover({ ...command, method: "CardMachine" }, csrf)).rejects.toThrow();
+  await expect(
+    client.recover({ ...command, method: "CardMachine", slipReference: "4111111111111111" }, csrf),
+  ).rejects.toThrow();
+  expect(fetcher).toHaveBeenCalledTimes(5);
+});

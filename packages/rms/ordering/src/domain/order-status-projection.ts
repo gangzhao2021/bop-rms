@@ -7,7 +7,19 @@ import {
   type OrderingReference,
 } from "./cart.js";
 
+export type OrderStatusCanonicalPhase =
+  "Submitted" | "Accepted" | "In Progress" | "Ready" | "Fulfilled" | "Rejected" | "Cancelled";
+
 export type OrderStatusFreshness = "Fresh" | "Stale" | "Rebuilding" | "Failed";
+
+/**
+ * WP-2423 (v15 b13 order-projection-and-round-race): the rounds one table's Order may hold, as the
+ * rest of Ordering bounds it (its round and line reads refuse past 10 000). A table that keeps
+ * ordering through a long dinner (hot pot, all-you-can-eat, dim sum) easily passes 20 rounds; the
+ * status once stopped at 20, so the 21st round's status never reached the guest or the staff and
+ * held back every later update of that Order.
+ */
+export const orderStatusMaximumRounds = 10_000;
 
 export interface OrderStatusMoney {
   readonly amountMinor: bigint;
@@ -40,7 +52,7 @@ export interface OrderStatusSourceSnapshot {
   readonly orderNumber: string;
   readonly orderType: CartOrderType;
   readonly sourceChannel: CartSourceChannel;
-  readonly canonicalPhase: "Submitted" | "Fulfilled";
+  readonly canonicalPhase: OrderStatusCanonicalPhase;
   readonly closureStatus: "Open";
   readonly paymentStatus: "NotReported";
   readonly kitchenStatus: "Unavailable";
@@ -200,7 +212,15 @@ export function parseOrderStatusSourceSnapshot(value: unknown): OrderStatusSourc
     !/^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/u.test(raw.businessDate) ||
     !["DineIn", "Pickup"].includes(String(raw.orderType)) ||
     !["Api", "Pos", "Qr", "Web"].includes(String(raw.sourceChannel)) ||
-    !["Submitted", "Fulfilled"].includes(String(raw.canonicalPhase)) ||
+    ![
+      "Submitted",
+      "Accepted",
+      "In Progress",
+      "Ready",
+      "Fulfilled",
+      "Rejected",
+      "Cancelled",
+    ].includes(String(raw.canonicalPhase)) ||
     raw.closureStatus !== "Open" ||
     raw.paymentStatus !== "NotReported" ||
     raw.kitchenStatus !== "Unavailable" ||
@@ -208,7 +228,7 @@ export function parseOrderStatusSourceSnapshot(value: unknown): OrderStatusSourc
     raw.eta !== null ||
     !Array.isArray(raw.batches) ||
     raw.batches.length < 1 ||
-    raw.batches.length > 20
+    raw.batches.length > orderStatusMaximumRounds
   )
     return invalid();
   const submittedAt = parseOrderingInstant(raw.submittedAt);
@@ -256,7 +276,7 @@ export function parseOrderStatusSourceSnapshot(value: unknown): OrderStatusSourc
     orderNumber: raw.orderNumber,
     orderType: raw.orderType as CartOrderType,
     sourceChannel: raw.sourceChannel as CartSourceChannel,
-    canonicalPhase: raw.canonicalPhase as "Submitted" | "Fulfilled",
+    canonicalPhase: raw.canonicalPhase as OrderStatusCanonicalPhase,
     closureStatus: "Open",
     paymentStatus: "NotReported",
     kitchenStatus: "Unavailable",

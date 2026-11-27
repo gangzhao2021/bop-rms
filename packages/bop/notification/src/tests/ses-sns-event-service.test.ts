@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { createSesSnsEventService, SesSnsEventError, type SesSnsEventPorts } from "../index.js";
+import {
+  createSesSnsEventService,
+  readVerifiedSesFeedbackRoute,
+  SesSnsEventError,
+  type SesSnsEventPorts,
+} from "../index.js";
 
 const id = (n: number) => `018faa00-0000-7000-8000-${n.toString(16).padStart(12, "0")}`;
 const topic = "arn:aws:sns:ca-central-1:123456789012:bop-transactional-events";
@@ -146,5 +151,75 @@ describe("SES SNS event authentication and privacy", () => {
         (test.ports.subscriptions.confirmExactTopic as ReturnType<typeof vi.fn>).mock.calls,
       ),
     ).not.toContain("SubscribeURL");
+  });
+});
+
+describe("batch 34: which Store an SNS delivery is for, at an installation of several Stores", () => {
+  const tagged = (tags: unknown) =>
+    JSON.stringify({
+      ...JSON.parse(sesMessage("Bounce")),
+      mail: { ...JSON.parse(sesMessage("Bounce")).mail, tags },
+    });
+  it("verifies the signature first, then reads the signed topic and configuration set", async () => {
+    const verifyVersion2 = vi.fn(async () => true);
+    const other = "arn:aws:sns:ca-central-1:123456789012:another-store-events";
+    await expect(
+      readVerifiedSesFeedbackRoute(
+        {
+          ...notification(tagged({ "ses:configuration-set": ["store-two"], purpose: ["x"] })),
+          TopicArn: other,
+        },
+        { verifyVersion2 },
+      ),
+    ).resolves.toEqual({
+      type: "Notification",
+      topicArn: other,
+      configurationSetName: "store-two",
+    });
+    expect(verifyVersion2).toHaveBeenCalledTimes(1);
+    expect(verifyVersion2).toHaveBeenCalledWith(
+      expect.objectContaining({
+        signingCertificateUrl: cert,
+        signature,
+      }),
+    );
+    // No tag, or not exactly one well-formed name: no configuration set.
+    for (const message of [
+      sesMessage("Bounce"),
+      tagged({ "ses:configuration-set": ["a", "b"] }),
+      tagged(["x"]),
+      "not json",
+    ])
+      expect(
+        (await readVerifiedSesFeedbackRoute(notification(message), { verifyVersion2 }))
+          .configurationSetName,
+      ).toBeNull();
+    await expect(readVerifiedSesFeedbackRoute(subscription(), { verifyVersion2 })).resolves.toEqual(
+      {
+        type: "SubscriptionConfirmation",
+        topicArn: topic,
+        configurationSetName: null,
+      },
+    );
+  });
+  it("refuses a forged, unverifiable or malformed delivery before reading its message", async () => {
+    for (const verifyVersion2 of [
+      vi.fn(async () => false),
+      vi.fn(async () => Promise.reject(new Error("x"))),
+    ])
+      await expect(
+        readVerifiedSesFeedbackRoute(notification(), { verifyVersion2 }),
+      ).rejects.toEqual(new SesSnsEventError("SES_SNS_SIGNATURE_INVALID"));
+    const verifyVersion2 = vi.fn(async () => true);
+    await expect(
+      readVerifiedSesFeedbackRoute(
+        { ...notification(), TopicArn: "arn:aws:sns:us-east-1:1:x" },
+        { verifyVersion2 },
+      ),
+    ).rejects.toEqual(new SesSnsEventError("SES_SNS_TOPIC_DENIED"));
+    await expect(
+      readVerifiedSesFeedbackRoute({ ...notification(), Signature: "!" }, { verifyVersion2 }),
+    ).rejects.toEqual(new SesSnsEventError("SES_SNS_INPUT_INVALID"));
+    expect(verifyVersion2).not.toHaveBeenCalled();
   });
 });

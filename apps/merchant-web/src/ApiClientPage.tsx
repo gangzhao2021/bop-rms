@@ -1,4 +1,5 @@
 import { StatePanel } from "@bop-rms/ui";
+import { SourceTime } from "./StoreTime.js";
 import { useEffect, useState } from "react";
 import {
   ApiClientPageError,
@@ -43,7 +44,7 @@ export function ApiClients({ view }: { readonly view: ApiClientAdminView }) {
           <p className="bop-eyebrow">{view.screenId} · Integration Administration</p>
           <h1>API Clients</h1>
           <p>
-            Source {view.sourceAsOf} · {view.completeness} · {view.freshness}
+            Source <SourceTime instant={view.sourceAsOf} /> · {view.completeness} · {view.freshness}
           </p>
         </div>
         {view.permissions.mayRequest ? (

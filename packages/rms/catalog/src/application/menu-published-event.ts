@@ -25,7 +25,9 @@ export function createMenuPublishedEnvelope(input: {
     tenantId: parseCatalogReference(input.brandReference),
     aggregateType: "Menu",
     aggregateId: parseCatalogReference(input.menuReference),
-    aggregateVersion: BigInt(lifecycle.version),
+    // WP-2423 / DEC-MENU-REVISION: the Menu's release sequence orders its publications across
+    // versions (each version's own lifecycle restarts), so projections advance on every release.
+    aggregateVersion: BigInt(release.sequence),
     correlationId: parseCatalogReference(input.correlationReference),
     causationId: parseCatalogReference(input.operationReference),
     actor: { type: "Actor", actorId: parseCatalogReference(input.actorReference) },

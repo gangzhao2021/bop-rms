@@ -1,0 +1,664 @@
+import { renderToStaticMarkup } from "react-dom/server";
+import { MemoryRouter } from "react-router";
+import { describe, expect, it } from "vitest";
+import { setLanguageForTest } from "./i18n/i18n.js";
+import {
+  closingReminderPhase,
+  closingReminderScreen,
+  closingReminderShows,
+  inClosingWindow,
+} from "./ClosingReminder.js";
+import { storeClosingNow } from "./PickupNotCollectedAction.js";
+import { parseTonightSummary } from "./store-reports-client.js";
+import { tonightProblems, TonightSummaryView } from "./TonightSummary.js";
+import { tonightSummaryFixture } from "./tonight-summary.fixtures.js";
+
+const render = (value: Record<string, unknown>) =>
+  renderToStaticMarkup(
+    <MemoryRouter>
+      <TonightSummaryView summary={parseTonightSummary(value)} />
+    </MemoryRouter>,
+  );
+
+describe("DEC-PAID-ORDER-AUTO-ACCEPT: decisions nobody senior was asked about, named tonight", () => {
+  const events = [
+    {
+      kind: "CantMake",
+      orderNumber: "21",
+      staffName: "Mei",
+      reasonCode: "SOLD_OUT",
+      at: "2026-10-28T00:10:00.000Z",
+    },
+    {
+      kind: "AutomaticRefund",
+      orderNumber: "22",
+      staffName: null,
+      reasonCode: "STORE_ERROR",
+      at: "2026-10-28T00:20:00.000Z",
+    },
+    {
+      kind: "KeptByHand",
+      orderNumber: "23",
+      staffName: null,
+      reasonCode: null,
+      at: "2026-10-28T00:30:00.000Z",
+    },
+    {
+      kind: "RoundMadeByHand",
+      orderNumber: "24",
+      roundSequence: 2,
+      staffName: "Mei",
+      reasonCode: null,
+      at: "2026-10-28T00:40:00.000Z",
+    },
+  ];
+  it("lists each in staff words, with who and why, never a code", () => {
+    const html = render({ ...tonightSummaryFixture(), paidOrderEvents: events });
+    expect(html).toContain("Order 21 · Can&#x27;t make it · refunded");
+    expect(html).toContain("Mei · Sold out");
+    expect(html).toContain("Order 22 · refunded automatically · the kitchen never started it");
+    expect(html).toContain("Order 23 · made by hand · not refunded automatically");
+    // A table round is never refunded automatically: its line says which round, and no refund.
+    expect(html).toContain("Order 24 · round 2 · made by hand");
+    expect(html).not.toMatch(/Order 24[^<]*refund/u);
+    expect(html).not.toContain("RoundMadeByHand");
+    expect(html).not.toContain("SOLD_OUT");
+    expect(html).not.toContain("STORE_ERROR");
+    expect(html).not.toContain("KeptByHand");
+  });
+  it("WP-2423 live minor 13: an earlier day's order is named with its date, today's without", () => {
+    const html = render({
+      ...tonightSummaryFixture(),
+      paidOrderEvents: [
+        { ...events[3], orderNumber: "16", orderBusinessDate: "2026-10-26" },
+        { ...events[2], orderNumber: "17", orderBusinessDate: "2026-10-27" },
+      ],
+    });
+    // The summary is for 2026-10-27; order 16 belongs to the table opened the evening before.
+    expect(html).toContain("Order 10/26 · 16 · round 2 · made by hand");
+    expect(html).toContain("Order 17 · made by hand · not refunded automatically");
+    setLanguageForTest("zh-Hans");
+    try {
+      expect(
+        render({
+          ...tonightSummaryFixture(),
+          paidOrderEvents: [{ ...events[3], orderNumber: "16", orderBusinessDate: "2026-10-26" }],
+        }),
+      ).toContain("10/26 · 16");
+    } finally {
+      setLanguageForTest("en");
+    }
+    // A wrong day is refused; an older server without it still reads.
+    expect(() =>
+      parseTonightSummary({
+        ...tonightSummaryFixture(),
+        paidOrderEvents: [{ ...events[0], orderBusinessDate: "yesterday" }],
+      }),
+    ).toThrow();
+    expect(
+      parseTonightSummary({ ...tonightSummaryFixture(), paidOrderEvents: [events[0]] })
+        .paidOrderEvents[0]?.orderBusinessDate,
+    ).toBeNull();
+  });
+  it("a Store without any sees nothing new, and a wrong entry is refused", () => {
+    expect(parseTonightSummary(tonightSummaryFixture()).paidOrderEvents).toEqual([]);
+    expect(render(tonightSummaryFixture())).not.toContain(
+      "Paid orders sent straight to the kitchen",
+    );
+    expect(() =>
+      parseTonightSummary({
+        ...tonightSummaryFixture(),
+        paidOrderEvents: [{ ...events[0], kind: "Deleted" }],
+      }),
+    ).toThrow();
+    // Only a table round names its round, and always does.
+    for (const wrong of [
+      { ...events[0], roundSequence: 1 },
+      { ...events[3], roundSequence: undefined },
+      { ...events[3], roundSequence: 0 },
+    ])
+      expect(() =>
+        parseTonightSummary({ ...tonightSummaryFixture(), paidOrderEvents: [wrong] }),
+      ).toThrow();
+  });
+});
+
+describe("WP-2423 item 8 ② tonight's closing summary", () => {
+  it("Owner addition (a): the sample's figures add up and the real parser accepts it", () => {
+    const summary = parseTonightSummary(tonightSummaryFixture());
+    expect(tonightProblems(summary)).toEqual([]);
+    const s = summary.report.summary;
+    // The evening the Figma sample (page 47-2) shows, worked through.
+    expect([s.grossSalesMinor, s.compsMinor, s.netSalesMinor, s.taxMinor]).toEqual([
+      "41250",
+      "1825",
+      "39425",
+      "5125",
+    ]);
+    expect([s.tipsMinor, s.cashRoundingMinor, s.collectedMinor]).toEqual(["5750", "5", "50305"]);
+    expect([s.refundsMinor, s.netCollectedMinor]).toEqual(["1200", "49105"]);
+    expect(summary.openTablesOwedMinor).toBe("8640");
+  });
+  it("catches figures that don't add up", () => {
+    const broken = tonightSummaryFixture();
+    const report = broken.report as { summary: Record<string, unknown> };
+    report.summary.collectedMinor = "51645";
+    expect(tonightProblems(parseTonightSummary(broken))).toContain("collected");
+    const tables = tonightSummaryFixture();
+    tables.openTablesOwedMinor = "9000";
+    // The parser itself refuses an open-tables total that isn't the tables added up.
+    expect(() => parseTonightSummary(tables)).toThrow();
+  });
+  it("shows sales, takings with the card-machine batch check and the drawer note, open tables and cancellations", () => {
+    const html = render(tonightSummaryFixture());
+    for (const text of [
+      "Gross sales",
+      "$412.50",
+      "Comps and discounts by a manager",
+      "−$18.25",
+      "$394.25",
+      "Tax · HST",
+      "$51.25",
+      // Taken by method, cash in detail.
+      "$191.60",
+      "$219.50",
+      "$91.95",
+      // Batch 63 F52: the drawer check in Settlement's lines; the rounding is inside the cash.
+      "Net cash",
+      "$86.95",
+      "$503.05",
+      "$491.05",
+      // (b) the card machine's batch should match what it took, refunds off (a printed line).
+      "Card machine net",
+      "so it can be higher",
+      // (c) the drawer also holds the merchant's own register cash.
+      "The cash drawer also holds cash taken on your own register.",
+      // Open tables and the write-off.
+      "Table 12",
+      "$52.10",
+      // Only the tables that still owe are counted under "not paid yet" (v15 finding a).
+      "2 tables · $86.40 to take before closing",
+      "Paid, guests still seated",
+      "Table 3",
+      "Guests left without paying (written off)",
+      "$23.04",
+      // Listed, not sales.
+      "Dishes taken off a bill before payment",
+      "$18.80",
+      "Rounds and orders cancelled unpaid",
+    ])
+      expect(html, text).toContain(text);
+  });
+  it("batch 63 F52 (RA-01, RA-09, RA-17): the money column is one sum and every till check is a printed line", () => {
+    const value = tonightSummaryFixture();
+    // A $2.00 card-machine refund (v15 TM2: the batch figure no line of the tab showed).
+    const report = value.report as {
+      summary: Record<string, unknown>;
+      byChannel: Record<string, unknown>[];
+      byOrderType: Record<string, unknown>[];
+      reconciliation: Record<string, unknown>;
+    };
+    const plus = (row: Record<string, unknown>, key: string, minor: number) => {
+      row[key] = String(BigInt(String(row[key])) + BigInt(minor));
+    };
+    const refund = (row: Record<string, unknown>) => {
+      plus(row, "refundCount", 1);
+      plus(row, "refundsMinor", 200);
+      plus(row, "netCollectedMinor", -200);
+      plus(row, "netSalesAfterRefundsMinor", -177);
+      plus(row, "taxAfterRefundsMinor", -23);
+      const parts = row.refunds as Record<string, unknown>;
+      plus(parts, "salesMinor", 177);
+      plus(parts, "taxMinor", 23);
+      row.refundCount = Number(row.refundCount);
+    };
+    // The day's summary and channels are shared with its one day (one object each).
+    refund(report.summary);
+    refund(report.byChannel.find((row) => row.channel === "CardMachine") ?? {});
+    refund(report.byOrderType.find((row) => row.orderType === "DineIn") ?? {});
+    plus(report.reconciliation, "settlementRefundedMinor", 200);
+    plus(report.reconciliation, "reportRefundedMinor", 200);
+    const summary = parseTonightSummary(value);
+    expect(tonightProblems(summary)).toEqual([]);
+    const html = render(value);
+    const between = (from: string, to: string) =>
+      html.slice(html.indexOf(`id="${from}"`), html.indexOf(`id="${to}"`));
+    const rows = (part: string) =>
+      [
+        ...part.matchAll(
+          /<dt>(.*?)(?:<span class="tonight__detail">(.*?)<\/span>)?<\/dt><dd>(.*?)<\/dd>/gu,
+        ),
+      ].map((match) => ({ label: match[1], detail: match[2] ?? "", value: match[3] ?? "" }));
+    const cents = (text: string) =>
+      (text.startsWith("−") ? -1 : 1) * Math.round(Number(text.replace(/[^0-9.]/gu, "")) * 100);
+    // The money column: the methods, then Total taken − Refunds = Net taken, nothing between.
+    const takings = between("tonight-takings", "tonight-check");
+    expect(takings).not.toContain("Cash rounding");
+    expect(takings).not.toContain("Cash given back");
+    const column = rows(takings);
+    expect(column.slice(0, 3).map((row) => row.label)).toEqual([
+      "Total taken",
+      "Refunds",
+      "Net taken",
+    ]);
+    const taken = [
+      ...takings.matchAll(
+        /<tr><th scope="row">.*?<\/th><td>\d+<\/td><td>.*?<\/td><td>(.*?)<\/td><\/tr>/gu,
+      ),
+    ];
+    expect(taken).toHaveLength(3);
+    expect(taken.reduce((sum, match) => sum + cents(match[1] ?? ""), 0)).toBe(
+      cents(column[0]?.value ?? ""),
+    );
+    expect(cents(column[0]?.value ?? "") + cents(column[1]?.value ?? "")).toBe(
+      cents(column[2]?.value ?? ""),
+    );
+    // The till checks, each adding up line by line, in Settlement's words.
+    const check = between("tonight-check", "tonight-open");
+    const lines = rows(check);
+    expect(lines.map((row) => row.label)).toEqual([
+      "Taken on card machine",
+      "Refunded on card machine",
+      "Card machine net",
+      "Cash received",
+      "Cash refunds",
+      "Net cash",
+    ]);
+    const [machineTaken = 0, machineRefunded = 0, machineNet, cashIn = 0, cashOut = 0, cashNet] =
+      lines.map((row) => cents(row.value));
+    expect([machineTaken, machineRefunded, machineNet]).toEqual([21950, -200, 21750]);
+    expect(lines[1]?.detail).toBe("1 refund");
+    expect(lines[2]?.detail).toBe("Compare with the machine&#x27;s batch total");
+    expect(machineTaken + machineRefunded).toBe(machineNet);
+    expect(cashIn + cashOut).toBe(cashNet);
+    // RA-09: the rounding is a part of the cash received, signed, never a line taken off it.
+    expect(lines[3]?.detail).toBe("of which cash rounding +$0.05");
+    // RA-17: the notes are notes at the rows' edge, not an indented list.
+    expect(check).toContain('<p class="tonight__note">Tables and counter, tips included.');
+    expect(check).not.toContain("<li>");
+  });
+  it("batch 63 RA-11: tonight's tables all paid beside earlier days' open ones says tonight, with a way to Tables", () => {
+    const value = tonightSummaryFixture();
+    // v15 TM2: tonight is paid, while Table 2 has been checking out for 19 days.
+    value.openTables = [
+      {
+        tableLabel: "2",
+        phase: "Closing",
+        paymentTiming: "PayLater",
+        owedMinor: "1780",
+        openedMinutes: 19 * 24 * 60,
+        standing: "Owes",
+      },
+      {
+        tableLabel: "4",
+        phase: "Active",
+        paymentTiming: "PayLater",
+        owedMinor: "0",
+        openedMinutes: 10 * 24 * 60,
+        standing: "NothingOrdered",
+      },
+    ];
+    value.openTablesOwedMinor = "1780";
+    const html = render(value);
+    const open = html.slice(
+      html.indexOf('id="tonight-open"'),
+      html.indexOf('id="tonight-cancelled"'),
+    );
+    expect(open).toContain("Tonight: every table is paid");
+    expect(open).not.toContain(">Every table is paid");
+    const earlier = open.slice(open.indexOf("From earlier days"));
+    expect(earlier).toContain('<a href="/operations/dining" data-discover="true">Go to Tables</a>');
+    // Every row of the tables part keeps the dot's column (CSS), dot or not.
+    expect(html).toContain('class="tonight__section tonight__tables"');
+    // With no earlier days, "every table" needs no "tonight".
+    expect(
+      render({ ...tonightSummaryFixture(), openTables: [], openTablesOwedMinor: "0" }),
+    ).toContain(">Every table is paid");
+  });
+  it("WP-2423 M163: money taken back is on its own line and in the drawer and the machine's batch", () => {
+    const value = tonightSummaryFixture();
+    const report = value.report as {
+      summary: Record<string, unknown>;
+      byChannel: Record<string, unknown>[];
+      byOrderType: Record<string, unknown>[];
+      days: { summary: Record<string, unknown>; byChannel: Record<string, unknown>[] }[];
+    };
+    const taken = (row: Record<string, unknown>, count: number, minor: string) => {
+      row.moneyTakenBackCount = count;
+      row.moneyTakenBackMinor = minor;
+    };
+    const by = (rows: Record<string, unknown>[], channel: string) =>
+      rows.find((row) => row.channel === channel) ?? {};
+    for (const rows of [report.byChannel, ...report.days.map((day) => day.byChannel)]) {
+      taken(by(rows, "Online"), 0, "0");
+      taken(by(rows, "CardMachine"), 1, "125");
+      taken(by(rows, "Cash"), 1, "500");
+    }
+    taken(report.summary, 2, "625");
+    for (const day of report.days) taken(day.summary, 2, "625");
+    for (const row of report.byOrderType) taken(row, 0, "0");
+    const summary = parseTonightSummary(value);
+    expect(tonightProblems(summary)).toEqual([]);
+    const html = render(value);
+    for (const text of [
+      "Money taken back after refunds made by mistake",
+      "$6.25",
+      "Cash taken back",
+      // Table cash $86.95 + $5.00 taken back; the batch $219.50 + $1.25 charged on the machine.
+      "$91.95",
+      // v15 M57: the machine figure is what this system recorded on it.
+      "Charged back on card machine",
+      "$220.75",
+    ])
+      expect(html, text).toContain(text);
+    // Refunds and net taken stay as they were.
+    expect(html).toContain("$491.05");
+  });
+  it("v15 2026-10-30: says it matches the day-end settlement only when every payment is in sales", () => {
+    expect(render(tonightSummaryFixture())).toContain("Matches the day-end settlement");
+    const short = tonightSummaryFixture();
+    const report = short.report as {
+      summary: Record<string, unknown>;
+      reconciliation: Record<string, unknown>;
+    };
+    // A payment not counted in sales and tax (the sales are short by it).
+    report.summary.unmatchedMinor = "4606";
+    report.summary.netSalesMinor = String(BigInt(String(report.summary.netSalesMinor)) - 4606n);
+    report.summary.grossSalesMinor = String(BigInt(String(report.summary.grossSalesMinor)) - 4606n);
+    const html = render(short);
+    expect(html).toContain("Paid but not matched to items");
+    expect(html).toContain("$46.06");
+    expect(html).toContain("Doesn&#x27;t match the day-end settlement");
+    expect(html).not.toContain("Matches the day-end settlement");
+    const money = tonightSummaryFixture();
+    (money.report as { reconciliation: Record<string, unknown> }).reconciliation.matchesSettlement =
+      false;
+    expect(render(money)).toContain("are not counted in these figures yet");
+  });
+  it("v15 finding a: never lists a paid table under not paid yet at $0.00", () => {
+    const html = render(tonightSummaryFixture());
+    const notPaid = html.slice(
+      html.indexOf("Tables not paid yet"),
+      html.indexOf("Paid, guests still seated"),
+    );
+    expect(notPaid).not.toContain("Table 3");
+    expect(notPaid).not.toContain("$0.00");
+  });
+  it("M40: a table that paid nothing is never listed as paid", () => {
+    const fixture = tonightSummaryFixture();
+    const tables = fixture.openTables as Record<string, unknown>[];
+    tables.push(
+      {
+        tableLabel: "4",
+        phase: "Active",
+        paymentTiming: "PayFirst",
+        owedMinor: "0",
+        openedMinutes: 20,
+        standing: "NothingOrdered",
+      },
+      {
+        tableLabel: "5",
+        phase: "Active",
+        paymentTiming: "PayFirst",
+        owedMinor: "0",
+        openedMinutes: 30,
+        standing: "NothingToCollect",
+      },
+      {
+        tableLabel: "6",
+        phase: "Active",
+        paymentTiming: "PayFirst",
+        owedMinor: "0",
+        openedMinutes: 10,
+        standing: "RoundUnpaid",
+      },
+      {
+        tableLabel: "8",
+        phase: "Closing",
+        paymentTiming: "PayLater",
+        owedMinor: "0",
+        openedMinutes: 90,
+        standing: "WrittenOff",
+      },
+    );
+    const html = render(fixture);
+    const paid = html.slice(html.indexOf("Paid, guests still seated"));
+    const paidRow = paid.slice(0, paid.indexOf("</div>"));
+    expect(paidRow).toContain("Table 3");
+    for (const label of ["Table 4", "Table 5", "Table 6", "Table 8"])
+      expect(paidRow, label).not.toContain(label);
+    expect(html).toContain("Seated, nothing ordered");
+    expect(html).toContain("Cancelled, nothing to collect");
+    const notPaid = html.slice(
+      html.indexOf("Tables not paid yet"),
+      html.indexOf("Paid, guests still seated"),
+    );
+    expect(notPaid).toContain("Table 6");
+    expect(notPaid).toContain("Round waiting for payment");
+    // A standing the server never sends is refused.
+    const wrong = tonightSummaryFixture();
+    const first = (wrong.openTables as Record<string, unknown>[])[0];
+    if (first === undefined) throw new Error("fixture");
+    first.standing = "Settled";
+    expect(() => parseTonightSummary(wrong)).toThrow();
+  });
+  it("batch 61 (v15 b60 live, 390): rows listing tables let the names wrap; amounts never do", () => {
+    const fixture = tonightSummaryFixture();
+    (fixture.openTables as Record<string, unknown>[]).push(
+      ...["L60P A (TEST)", "L60P B (TEST)", "Patio window (TEST)", "Booth by the door (TEST)"].map(
+        (tableLabel) => ({
+          tableLabel,
+          phase: "Active",
+          paymentTiming: "PayLater",
+          owedMinor: "0",
+          openedMinutes: 30,
+          standing: "Paid",
+        }),
+      ),
+    );
+    (fixture.openTables as Record<string, unknown>[]).push(
+      ...(["NothingOrdered", "NothingToCollect"] as const).map((standing, index) => ({
+        tableLabel: "Garden " + String(index + 1) + " (TEST)",
+        phase: "Active",
+        paymentTiming: "PayLater",
+        owedMinor: "0",
+        openedMinutes: 20,
+        standing,
+      })),
+    );
+    const html = render(fixture);
+    const rowOf = (label: string) => {
+      const at = html.lastIndexOf('<div class="tonight__row"', html.indexOf(label));
+      return html.slice(at, html.indexOf(">", at) + 1);
+    };
+    expect(rowOf("Paid, guests still seated")).toContain('data-list="true"');
+    expect(rowOf("Seated, nothing ordered")).toContain('data-list="true"');
+    expect(rowOf("Cancelled, nothing to collect")).toContain('data-list="true"');
+    expect(rowOf("Gross sales")).not.toContain("data-list");
+  });
+  it("batch 62 (v15 b61 live, C61 A): a table comped to nothing is said comped, never cancelled", () => {
+    const fixture = tonightSummaryFixture();
+    // As v15 listed TM2 that night: C61 A comped in full and still seated; C61 F's only round
+    // taken off the bill before anything was made.
+    (fixture.openTables as Record<string, unknown>[]).push(
+      {
+        tableLabel: "C61 A (TEST)",
+        phase: "Active",
+        paymentTiming: "PayLater",
+        owedMinor: "0",
+        openedMinutes: 35,
+        standing: "Comped",
+      },
+      {
+        tableLabel: "C61 F (TEST)",
+        phase: "Active",
+        paymentTiming: "PayLater",
+        owedMinor: "0",
+        openedMinutes: 25,
+        standing: "NothingToCollect",
+      },
+    );
+    const rowWith = (html: string, label: string) => {
+      const at = html.indexOf(label);
+      expect(at, label).toBeGreaterThan(-1);
+      return html.slice(at, html.indexOf("</div>", at));
+    };
+    for (const [language, comped, cancelled] of [
+      ["en", "Comped by a manager, nothing to collect", "Cancelled, nothing to collect"],
+      ["zh-Hans", "经理已免单，无需收款", "已取消，无需收款"],
+    ] as const) {
+      setLanguageForTest(language);
+      try {
+        const html = render(fixture);
+        expect(rowWith(html, comped)).toContain("C61 A (TEST)");
+        expect(rowWith(html, comped)).not.toContain("C61 F");
+        expect(rowWith(html, cancelled)).toContain("C61 F (TEST)");
+        expect(rowWith(html, cancelled)).not.toContain("C61 A");
+      } finally {
+        setLanguageForTest("en");
+      }
+    }
+  });
+  it("batch 62 (v15 b61 live, 390): each table's name in a list row is kept whole", () => {
+    const fixture = tonightSummaryFixture();
+    const names = ["S61 A (TEST)", "S61 B (TEST)", "C61 B (TEST)", "C61 C (TEST)"];
+    (fixture.openTables as Record<string, unknown>[]).push(
+      ...names.map((tableLabel) => ({
+        tableLabel,
+        phase: "Active",
+        paymentTiming: "PayLater",
+        owedMinor: "0",
+        openedMinutes: 30,
+        standing: "Paid",
+      })),
+    );
+    for (const [language, joined] of [
+      ["en", "S61 A (TEST), S61 B (TEST), C61 B (TEST), C61 C (TEST)"],
+      ["zh-Hans", "S61 A (TEST)、S61 B (TEST)、C61 B (TEST)、C61 C (TEST)"],
+    ] as const) {
+      setLanguageForTest(language);
+      try {
+        const html = render(fixture);
+        // One box per name, the separator inside it, so a line can only break between names.
+        for (const [index, name] of names.entries())
+          expect(html).toContain(
+            `<span class="tonight__name">${name}${index < names.length - 1 ? (language === "en" ? "," : "、") : ""}</span>`,
+          );
+        const text = html.replace(/<wbr\/?>/gu, "").replace(/<[^>]+>/gu, "");
+        expect(text).toContain(joined);
+      } finally {
+        setLanguageForTest("en");
+      }
+    }
+  });
+  it("times the closing reminder by the Store's published closing", () => {
+    const endsAt = "2026-10-28T08:00:00.000Z"; // 04:00 the next morning, Toronto.
+    const at = (instant: string) => Date.parse(instant);
+    // Lunch-only, closing 14:30 Toronto (18:30Z): an hour before and after, then only unpaid tables.
+    const lunch = { endsAt, closesAt: "2026-10-27T18:30:00.000Z", closedToday: false };
+    expect(closingReminderPhase(lunch, at("2026-10-27T17:29:00.000Z"))).toBe("Hidden");
+    expect(closingReminderPhase(lunch, at("2026-10-27T17:30:00.000Z"))).toBe("BeforeClosing");
+    expect(closingReminderPhase(lunch, at("2026-10-27T18:30:00.000Z"))).toBe("AfterClosing");
+    expect(closingReminderPhase(lunch, at("2026-10-27T19:30:00.000Z"))).toBe("UnpaidTablesOnly");
+    expect(closingReminderPhase(lunch, at("2026-10-28T00:30:00.000Z"))).toBe("UnpaidTablesOnly");
+    // Overnight, closing 01:30 Toronto: not at 20:00, as the old rule would have been.
+    const overnight = { endsAt, closesAt: "2026-10-28T05:30:00.000Z", closedToday: false };
+    expect(closingReminderPhase(overnight, at("2026-10-28T00:30:00.000Z"))).toBe("Hidden");
+    expect(closingReminderPhase(overnight, at("2026-10-28T05:00:00.000Z"))).toBe("BeforeClosing");
+    expect(closingReminderPhase(overnight, at("2026-10-28T06:00:00.000Z"))).toBe("AfterClosing");
+    // Closed today: only an unpaid table is worth saying.
+    const closed = { endsAt, closesAt: null, closedToday: true };
+    expect(closingReminderPhase(closed, at("2026-10-27T18:00:00.000Z"))).toBe("UnpaidTablesOnly");
+    // Hours unreadable or not published: the last 8 hours of the day, not silence.
+    const unknown = { endsAt, closesAt: null, closedToday: false };
+    expect(closingReminderPhase(unknown, at("2026-10-28T00:30:00.000Z"))).toBe("BeforeClosing");
+    expect(closingReminderPhase(unknown, at("2026-10-27T23:00:00.000Z"))).toBe("Hidden");
+    expect(closingReminderPhase({ endsAt }, at("2026-10-28T00:30:00.000Z"))).toBe("BeforeClosing");
+    expect(closingReminderPhase(null, at("2026-10-28T00:30:00.000Z"))).toBe("Hidden");
+  });
+  it("shows the fallback closing reminder in the last 8 hours of the business day only", () => {
+    const endsAt = "2026-10-28T08:00:00.000Z";
+    expect(inClosingWindow(endsAt, Date.parse("2026-10-28T00:30:00.000Z"))).toBe(true);
+    expect(inClosingWindow(endsAt, Date.parse("2026-10-27T23:00:00.000Z"))).toBe(false);
+    expect(inClosingWindow(endsAt, Date.parse("2026-10-28T08:00:00.000Z"))).toBe(false);
+    expect(inClosingWindow(null, Date.now())).toBe(false);
+  });
+  it("batch 36: keeps Home quiet after midnight while a Store open all day is still open", () => {
+    // Test Merchant 2: open 00:00-23:59:59, business day 04:00 to 04:00 (09:00Z). At 00:49 the
+    // business day still closes with Friday's period, after the day itself ends; the business day
+    // read now gives that (it used to give Thursday 23:59:59, and Home said "after closing").
+    const day = {
+      endsAt: "2026-11-20T09:00:00.000Z",
+      closesAt: "2026-11-21T04:59:59.000Z",
+      closedToday: false,
+    };
+    const at = Date.parse("2026-11-20T05:49:00.000Z");
+    expect(closingReminderPhase(day, at)).toBe("Hidden");
+    expect(storeClosingNow(day, at)).toBe(false);
+    const before = { ...day, closesAt: "2026-11-20T04:59:59.000Z" };
+    expect(closingReminderPhase(before, at)).toBe("AfterClosing");
+    expect(storeClosingNow(before, at)).toBe(true);
+  });
+  it("batch 47 review: says nothing about closing to a Store open all day as its day ends", () => {
+    // Test Merchant 2 as the business day read now gives it: the day's closing is capped at the
+    // end of the business day (04:00 Toronto, 09:00Z), so closing and the day's end are the same.
+    const day = {
+      endsAt: "2026-11-24T09:00:00.000Z",
+      closesAt: "2026-11-24T09:00:00.000Z",
+      closedToday: false,
+      openAtDayEnd: true,
+    };
+    for (const instant of [
+      "2026-11-24T05:00:00.000Z",
+      "2026-11-24T08:00:00.000Z",
+      "2026-11-24T08:30:00.000Z",
+      "2026-11-24T08:59:00.000Z",
+    ])
+      expect(closingReminderPhase(day, Date.parse(instant))).toBe("Hidden");
+    // A Store that does close before the day ends is still reminded.
+    const closes = { ...day, closesAt: "2026-11-24T08:30:00.000Z", openAtDayEnd: false };
+    expect(closingReminderPhase(closes, Date.parse("2026-11-24T08:00:00.000Z"))).toBe(
+      "BeforeClosing",
+    );
+  });
+  it("batch 47 fix-up: reminds a Store whose last period ends exactly as its day ends", () => {
+    // 18:00 to 4:00 the next morning, business day from 4:00 (09:00Z): it really closes at 4:00,
+    // so from 3:00 Home says to look over today's summary before closing, as at 059864869.
+    const day = {
+      endsAt: "2026-11-24T09:00:00.000Z",
+      closesAt: "2026-11-24T09:00:00.000Z",
+      closedToday: false,
+      openAtDayEnd: false,
+    };
+    expect(closingReminderPhase(day, Date.parse("2026-11-24T07:59:00.000Z"))).toBe("Hidden");
+    for (const instant of ["2026-11-24T08:00:00.000Z", "2026-11-24T08:59:00.000Z"])
+      expect(closingReminderPhase(day, Date.parse(instant))).toBe("BeforeClosing");
+    expect(
+      closingReminderShows([closingReminderScreen], day, Date.parse("2026-11-24T08:30:00.000Z")),
+    ).toBe(true);
+  });
+});
+
+describe("M117: after the Store closes, before the business day ends", () => {
+  // Generated 2026-10-28 01:42 UTC (21:42 in Toronto).
+  const view = (closesAt: string | null) =>
+    renderToStaticMarkup(
+      <MemoryRouter>
+        <TonightSummaryView
+          summary={parseTonightSummary(tonightSummaryFixture())}
+          closesAt={closesAt}
+        />
+      </MemoryRouter>,
+    );
+  it("says closed with today's books still open once the closing time has passed", () => {
+    const after = view("2026-10-28T01:00:00.000Z");
+    expect(after).toContain("Closed · today&#x27;s books still open");
+    expect(after).not.toContain("Open now");
+    expect(after).toContain('data-open="false"');
+  });
+  it("still says open before the closing time, or when the closing time is unknown", () => {
+    for (const closesAt of ["2026-10-28T03:00:00.000Z", null])
+      // Batch 64: when it was read is the page's one "Updated 21:42" stamp, not "as of" here.
+      expect(view(closesAt)).toContain("Open now</span>");
+  });
+});

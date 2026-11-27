@@ -37,6 +37,7 @@ import type {
   KitchenTicketCommitResult,
   KitchenTicketCreationEffect,
   KitchenTicketCreationPorts,
+  KitchenTicketEffectValidationPorts,
   KitchenTicketIdentityResolution,
   KitchenTicketSemanticIdentity,
   KitchenStableReferencePurpose,
@@ -129,7 +130,7 @@ function canonical(value: unknown): string {
     .join(",")}}`;
 }
 
-function digest(ports: KitchenTicketCreationPorts, binding: string) {
+function digest(ports: KitchenTicketEffectValidationPorts, binding: string) {
   try {
     return parseKitchenTicketDigest(ports.digests.sha256(binding));
   } catch {
@@ -138,7 +139,7 @@ function digest(ports: KitchenTicketCreationPorts, binding: string) {
 }
 
 function reference(
-  ports: KitchenTicketCreationPorts,
+  ports: KitchenTicketEffectValidationPorts,
   purpose: KitchenStableReferencePurpose,
   identity: unknown,
 ) {
@@ -268,9 +269,18 @@ function sourceMatchesReceipt(
   );
 }
 
+/**
+ * The round's Ordering source as it is when the kitchen takes it (`observedAt`, the kitchen's own
+ * clock), never as of its confirmation: by the time a confirmed round is consumed, the Order may
+ * already hold later facts (another round accepted or sent, a line taken off), and a read as of the
+ * earlier instant fails on them every time (v15 2026-11-17, batch 29: four paid rounds of one
+ * table never reached the kitchen because the next round's acceptance landed before the consumer
+ * ran). The source still proves this round's own confirmation and acceptance are the current ones.
+ */
 async function resolveSource(
   ports: KitchenTicketCreationPorts,
   receipt: ConfirmedOrderIntakeReceipt,
+  observedAt: string,
 ): Promise<ConfirmedOrderKitchenSourceEvidence> {
   let value: unknown;
   try {
@@ -283,7 +293,7 @@ async function resolveSource(
       sourceEventReference: parseOrderingReference(receipt.sourceEventReference),
       sourceAggregateVersion: receipt.sourceAggregateVersion,
       sourceSnapshotDigest: parseOrderingHash(receipt.sourceSnapshotDigest),
-      observedAt: parseOrderingInstant(receipt.confirmedAt),
+      observedAt: parseOrderingInstant(observedAt),
     });
   } catch (error) {
     return mapOrderingFailure(error);
@@ -725,7 +735,7 @@ function effectMatchesTicket(effect: Omit<KitchenTicketCreationEffect, "effectDi
 }
 
 function effectReferencesMatchDerivation(
-  ports: KitchenTicketCreationPorts,
+  ports: KitchenTicketEffectValidationPorts,
   effect: Omit<KitchenTicketCreationEffect, "effectDigest">,
 ): boolean {
   const { ticket, action, audit, event } = effect;
@@ -821,7 +831,7 @@ function reconstructEffectSnapshots(ticket: KitchenTicket): {
 }
 
 function effectSnapshotDigestsMatch(
-  ports: KitchenTicketCreationPorts,
+  ports: KitchenTicketEffectValidationPorts,
   ticket: KitchenTicket,
 ): boolean {
   const snapshots = reconstructEffectSnapshots(ticket);
@@ -854,9 +864,9 @@ function effectSnapshotDigestsMatch(
   );
 }
 
-function parseEffect(
+export function parseKitchenTicketCreationEffect(
   value: unknown,
-  ports: KitchenTicketCreationPorts,
+  ports: KitchenTicketEffectValidationPorts,
   onMalformed: () => never = dependency,
 ): KitchenTicketCreationEffect {
   const raw = safeObject(
@@ -916,7 +926,7 @@ function createEffect(
     return dependency();
   }
   const withoutDigest = Object.freeze({ receipt, ticket, action, audit, event });
-  return parseEffect(
+  return parseKitchenTicketCreationEffect(
     { ...withoutDigest, effectDigest: digest(ports, effectBinding(withoutDigest)) },
     ports,
   );
@@ -978,7 +988,7 @@ function concurrentEffectBinding(
   });
 }
 
-function effectsMatchSemantic(
+export function kitchenCreationEffectsMatchSemantic(
   left: KitchenTicketCreationEffect,
   right: KitchenTicketCreationEffect,
 ): boolean {
@@ -1024,7 +1034,7 @@ async function repositoryResolution(
   }
   if (resolution.status === "Conflict") return conflict();
   if (resolution.status === "NotFound") return Object.freeze({ status: "NotFound" as const });
-  const effect = parseEffect(resolution.effect, ports, conflict);
+  const effect = parseKitchenTicketCreationEffect(resolution.effect, ports, conflict);
   if (!effectMatchesIdentity(effect, identity)) return conflict();
   return Object.freeze({ status: "Resolved" as const, effect });
 }
@@ -1048,7 +1058,7 @@ async function recoverCommitUnknown(
 ): Promise<KitchenTicketCreationResult> {
   const recovered = await repositoryResolution(ports, identity);
   if (recovered.status === "NotFound") return dependency();
-  if (!effectsMatchSemantic(recovered.effect, expected)) return conflict();
+  if (!kitchenCreationEffectsMatchSemantic(recovered.effect, expected)) return conflict();
   return result("AlreadyCreated", recovered.effect);
 }
 
@@ -1083,14 +1093,17 @@ export function createKitchenTicketCreationService(ports: KitchenTicketCreationP
         return result("AlreadyCreated", prior.effect);
       }
 
-      const source = await resolveSource(ports, receipt);
-      const planned = await resolvePlan(ports, receipt, source);
+      // The instant the kitchen takes the round: its Ordering source is read as of it, and the
+      // ticket is created at it. A clock behind the confirmation is retried, never read.
       let createdAt;
       try {
         createdAt = parseKitchenTicketInstant(await ports.clock.now());
       } catch {
         return dependency();
       }
+      if (Date.parse(createdAt) < Date.parse(receipt.confirmedAt)) return dependency();
+      const source = await resolveSource(ports, receipt, createdAt);
+      const planned = await resolvePlan(ports, receipt, source);
       if (
         Date.parse(createdAt) < Date.parse(receipt.confirmedAt) ||
         Date.parse(createdAt) < Date.parse(source.capturedAt) ||
@@ -1113,13 +1126,16 @@ export function createKitchenTicketCreationService(ports: KitchenTicketCreationP
       } catch {
         return recoverCommitUnknown(ports, identity, expected);
       }
-      const stored = parseEffect(commit.effect, ports, conflict);
+      const stored = parseKitchenTicketCreationEffect(commit.effect, ports, conflict);
       if (commit.status === "Conflict") {
         if (effectsMatchExact(stored, expected)) return dependency();
         return conflict();
       }
       if (commit.status === "Created" && !effectsMatchExact(stored, expected)) return conflict();
-      if (commit.status === "AlreadyCreated" && !effectsMatchSemantic(stored, expected))
+      if (
+        commit.status === "AlreadyCreated" &&
+        !kitchenCreationEffectsMatchSemantic(stored, expected)
+      )
         return conflict();
       return result(commit.status, stored);
     },

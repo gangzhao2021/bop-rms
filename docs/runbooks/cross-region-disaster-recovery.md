@@ -1,0 +1,13 @@
+# Cross-Region disaster recovery procedure
+
+Authority: [WP-2053](../spec/work-packages/WP-2053.md), Handoff 54.6 F20.3, 80.8.1, 86.8.1 and 87.8, and the [DR policy](../security/disaster-recovery-evidence-policy.json). This extends the navigation beyond the [isolated Staging restore](database-backup-restore-staging.md); no live drill has occurred here. Use the [evidence template](cross-region-disaster-recovery-evidence-template.md).
+
+1. Operations coordinator obtains the applicable drill/incident authorization, named operator and approvers, exact environment/candidate, current account/service support and endpoint inventory. Confirm `ca-central-1` primary and `ca-west-1` recovery, encryption, Multi-AZ, PITR, 35-day retention and destination preparations. Verify current service capabilities before a real operation. Missing identity, target, backup or authorization stops the procedure.
+2. Capture last confirmed source position and measured replica lag; preserve read-only destination until promotion. Accepted replica alert/page thresholds are 2/5 minutes; lag above the 5-minute RPO fails closed. Fence primary writes and independently confirm the fence before promotion; never permit split brain.
+3. Restore or promote using the environment's approved instructions. Include transactions, pg-boss, Outbox, Inbox, Idempotency, Session revocation and Audit. Projections/caches rebuild and cannot define the recovery point. Confirm S3/ECR destination preparation without unnecessary PII copying.
+4. Hold traffic until schema compatibility, Audit chain, malware/object references, authorization and applicable privacy tombstones pass. Verify both application and migration endpoints. Payment/webhook/email Unknown operations reconcile against original Idempotency Keys before any retry.
+5. The designated Route 53 authority approves traffic change only after checks, communications and rollback/fail-forward criteria are recorded. Measure RPO ≤5 minutes and RTO ≤60 minutes; record actual timestamps and positions, not configured intentions.
+6. On failed checks keep traffic/write fences in place, preserve evidence and escalate to Operations/Security and affected Domain owners. No automatic unfencing, destructive cleanup or return to an unverified primary. Failback/rollback requires compatible state and reconciliation plus its applicable approval.
+7. Close with operator/approver receipts, measured outcome, reconciliation, isolated-restore destruction evidence and follow-up ownership. Quarterly restore and semiannual failover evidence remain required external gates.
+
+No AWS/DNS/Provider commands or credentials are invented here. A policy/validator pass is not measured lag, account support or a real failover result.

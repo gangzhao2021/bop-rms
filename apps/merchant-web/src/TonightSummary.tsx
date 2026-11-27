@@ -1,0 +1,831 @@
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { NoAccessNotice } from "./NoAccessNotice.js";
+import { Link } from "react-router";
+import { useBrowserOffline } from "./stale-read.js";
+import { countOf, t, saidTable, listSeparator } from "./i18n/i18n.js";
+import { orderMoney } from "./order-money.js";
+import { elapsedText } from "./elapsed-text.js";
+import { openedOnEarlierDay } from "./earlier-day-tables.js";
+import { storeTime } from "./StoreTime.js";
+import { businessDateText, useStoreBusinessDay } from "./StoreBusinessDay.js";
+import { printRegion } from "./print-region.js";
+import {
+  StoreReportsClientError,
+  type StoreReportChannel,
+  type StoreReportsClient,
+  type StoreReportSummary,
+  type TonightPaidOrderEvent,
+  type TonightSummary,
+} from "./store-reports-client.js";
+import type { StaffCancellationReason } from "./current-order-queue-client.js";
+import { staffCancellationReasonLabel } from "./StaffOrderCancelAction.js";
+import { orderLabel } from "./CurrentOrderQueuePage.js";
+
+const money = (minor: string | bigint) =>
+  orderMoney({ amountMinor: String(minor), currencyCode: "CAD" });
+const minus = (minor: string | bigint) => "−" + money(minor);
+/** A line taken off a till check: "$0.00" when nothing was, never "−$0.00". */
+const less = (minor: string) => (minor === "0" ? money(minor) : minus(minor));
+/** "+$0.05" or "−$0.06": a part of a figure, signed, never a line taken off it. */
+const signedMoney = (minor: string) =>
+  minor.startsWith("-") ? "−" + money(minor.slice(1)) : "+" + money(minor);
+const channelText: Record<StoreReportChannel, string> = {
+  Online: t("Online (guest's phone)"),
+  CardMachine: t("Card machine"),
+  Cash: t("Cash"),
+};
+
+/** One payment method's evening, from today's report (its own figures, never recomputed). */
+export function tonightChannel(summary: TonightSummary, channel: StoreReportChannel) {
+  return summary.report.byChannel.find((entry) => entry.channel === channel) ?? null;
+}
+
+/**
+ * The checks the closing summary's figures always satisfy (the report's own rule): net sales are
+ * gross less discounts and comps; what was taken is net sales, service charges, tax, tips and
+ * cash rounding; the payment methods add up to the totals; and the open tables add up to their
+ * total. Owner addition (a), 2026-10-28: a sample or a screen whose numbers don't add up is wrong.
+ */
+export function tonightProblems(summary: TonightSummary): readonly string[] {
+  const s = summary.report.summary;
+  const n = (value: string) => BigInt(value);
+  const problems: string[] = [];
+  const check = (ok: boolean, what: string) => {
+    if (!ok) problems.push(what);
+  };
+  const rows: readonly StoreReportSummary[] = [s, ...summary.report.byChannel];
+  for (const row of rows) {
+    check(
+      n(row.grossSalesMinor) -
+        n(row.discountsMinor) -
+        n(row.compsMinor) -
+        n(row.pointsUsedMinor) ===
+        n(row.netSalesMinor),
+      "net sales",
+    );
+    check(
+      n(row.netSalesMinor) +
+        n(row.serviceChargesMinor) +
+        n(row.taxMinor) +
+        n(row.tipsMinor) +
+        n(row.cashRoundingMinor) +
+        n(row.unmatchedMinor) ===
+        n(row.collectedMinor),
+      "collected",
+    );
+    check(
+      n(row.collectedMinor) - n(row.refundsMinor) === n(row.netCollectedMinor),
+      "net collected",
+    );
+  }
+  const sum = (key: keyof StoreReportSummary) =>
+    summary.report.byChannel.reduce((total, row) => total + n(String(row[key])), 0n);
+  for (const key of [
+    "grossSalesMinor",
+    "compsMinor",
+    "pointsUsedMinor",
+    "netSalesMinor",
+    "taxMinor",
+    "tipsMinor",
+    "cashRoundingMinor",
+    "collectedMinor",
+    "refundsMinor",
+  ] as const)
+    check(sum(key) === n(String(s[key])), "payment methods · " + key);
+  check(
+    summary.openTables.reduce((total, table) => total + n(table.owedMinor), 0n) ===
+      n(summary.openTablesOwedMinor),
+    "open tables",
+  );
+  return problems;
+}
+
+/**
+ * "Order 12 · Can't make it · refunded": one line per decision nobody senior was asked about. An
+ * Order of an earlier business day (a table opened the evening before) carries its date, as on
+ * Orders ("Order 11/4 · 16 · …"): order numbers restart each day. `today`: the summary's day.
+ */
+export function tonightPaidOrderEventText(
+  event: TonightPaidOrderEvent,
+  today: string | null = null,
+): string {
+  const orderNumber = orderLabel(
+    { orderNumber: event.orderNumber, businessDate: event.orderBusinessDate },
+    today,
+  );
+  switch (event.kind) {
+    case "CantMake":
+      return t("Order {orderNumber} · Can't make it · refunded", { orderNumber });
+    case "AutomaticRefund":
+      return t("Order {orderNumber} · refunded automatically · the kitchen never started it", {
+        orderNumber,
+      });
+    case "KeptByHand":
+      return t("Order {orderNumber} · made by hand · not refunded automatically", {
+        orderNumber,
+      });
+    case "RoundMadeByHand":
+      return t("Order {orderNumber} · round {sequence} · made by hand", {
+        orderNumber,
+        sequence: event.roundSequence ?? 1,
+      });
+  }
+}
+
+/** Who, and the reason they chose, in staff words; never a code. */
+export function tonightPaidOrderEventDetail(event: TonightPaidOrderEvent): string | null {
+  const reason =
+    event.reasonCode !== null && Object.hasOwn(staffCancellationReasonLabel, event.reasonCode)
+      ? staffCancellationReasonLabel[event.reasonCode as StaffCancellationReason]
+      : null;
+  const parts = [event.kind === "AutomaticRefund" ? null : event.staffName, reason].filter(
+    (part): part is string => part !== null && part !== "",
+  );
+  return parts.length === 0 ? null : parts.join(" · ");
+}
+
+function Row({
+  label,
+  detail,
+  value,
+  strong = false,
+  muted = false,
+  tone,
+  list = false,
+}: {
+  readonly label: string;
+  readonly detail?: string | null;
+  /** A list row's value is its names, each kept whole on a line (batch 62). */
+  readonly value: string | readonly string[];
+  readonly strong?: boolean;
+  readonly muted?: boolean;
+  readonly tone?: "action" | undefined;
+  /**
+   * Batch 61 (v15 b60 live, 390): the value is a list of names (tables), not an amount: it wraps,
+   * under the label when the row is too narrow, instead of squeezing the label to a letter wide.
+   */
+  readonly list?: boolean;
+}) {
+  return (
+    <div
+      className="tonight__row"
+      data-strong={strong}
+      data-muted={muted}
+      data-tone={tone}
+      data-list={list ? "true" : undefined}
+    >
+      <dt>
+        {label}
+        {detail ? <span className="tonight__detail">{detail}</span> : null}
+      </dt>
+      <dd>
+        {typeof value === "string"
+          ? value
+          : // Batch 62 (v15 b61 live, 390): a name never breaks inside ("C61 C" / "(TEST)"); the
+            // line breaks only between names, after the separator.
+            value.map((name, index) => {
+              const separator = listSeparator();
+              const mark = separator.trimEnd();
+              const last = index === value.length - 1;
+              return (
+                <Fragment key={index}>
+                  <span className="tonight__name">
+                    {name}
+                    {last ? null : mark}
+                  </span>
+                  {last ? null : separator === mark ? <wbr /> : separator.slice(mark.length)}
+                </Fragment>
+              );
+            })}
+      </dd>
+    </div>
+  );
+}
+
+/**
+ * WP-2423 item 8 ② (Figma 47-2): tonight's closing summary — today's report so far (the same
+ * figures as the reports page and, once the day closes, the day-end settlement), what each
+ * payment method took with a card-machine batch check and the table cash this system recorded, the tables
+ * still open, and tonight's refunds and cancellations (listed, not sales).
+ */
+export function TonightSummaryView({
+  summary,
+  closesAt = null,
+}: {
+  readonly summary: TonightSummary;
+  /**
+   * M117: when the Store closed (or closes) this business day, from the Store's business day; the
+   * day stays "open" in the books until its boundary, which is not the Store being open.
+   */
+  readonly closesAt?: string | null;
+}) {
+  const report = summary.report;
+  const s = report.summary;
+  const day = report.days[0];
+  const online = tonightChannel(summary, "Online"),
+    machine = tonightChannel(summary, "CardMachine"),
+    cash = tonightChannel(summary, "Cash");
+  // WP-2423 M163: money taken back after a refund made by mistake is in the drawer (cash) and on
+  // the machine's batch (charged on it), on top of what was taken less refunds.
+  const machineNet =
+    machine === null ? 0n : BigInt(machine.netCollectedMinor) + BigInt(machine.moneyTakenBackMinor);
+  const drawer =
+    cash === null ? 0n : BigInt(cash.netCollectedMinor) + BigInt(cash.moneyTakenBackMinor);
+  // v15 2026-10-28 (a) and M40: a table is listed by where its money stands. "Paid, guests still
+  // seated" is only a table whose money was really taken and kept; a table that never ordered, or
+  // whose rounds all came off unpaid, is listed apart, and a walkout stays with the write-offs.
+  // b39 (v15 b38 sweep): a table left open from an earlier business day is not tonight's: it is
+  // listed apart, with what to do, and its money is not in tonight's "to take before closing".
+  const earlierTables = summary.openTables.filter((table) =>
+    openedOnEarlierDay(
+      table.openedMinutes,
+      Date.parse(report.generatedAt),
+      Date.parse(report.startsAt),
+    ),
+  );
+  const tonightTables = summary.openTables.filter((table) => !earlierTables.includes(table));
+  const open = tonightTables.filter(
+    (table) => table.standing === "Owes" || table.standing === "RoundUnpaid",
+  );
+  const openOwedMinor = open.reduce((sum, table) => sum + BigInt(table.owedMinor), 0n);
+  const paidSeated = tonightTables.filter((table) => table.standing === "Paid");
+  const nothingOrdered = tonightTables.filter((table) => table.standing === "NothingOrdered");
+  const nothingToCollect = tonightTables.filter((table) => table.standing === "NothingToCollect");
+  // Batch 62 (v15 b61 live, C61 A): dishes served and then comped by a manager are not cancelled.
+  const comped = tonightTables.filter((table) => table.standing === "Comped");
+  const standingText = (table: (typeof summary.openTables)[number]) =>
+    table.standing === "Paid"
+      ? t("Paid, guests still seated")
+      : table.standing === "NothingOrdered"
+        ? t("Seated, nothing ordered")
+        : table.standing === "NothingToCollect"
+          ? t("Cancelled, nothing to collect")
+          : table.standing === "Comped"
+            ? t("Comped by a manager, nothing to collect")
+            : table.phase === "Closing"
+              ? t("Checking out")
+              : t("Seated");
+  const tableNames = (tables: typeof open) =>
+    tables.map((table) => t("Table {table}", { table: saidTable(table.tableLabel) }));
+  const c = summary.cancelled;
+  // Every payment taken is counted in sales and tax, and the money agrees with the settlement.
+  const matches = report.reconciliation.matchesSettlement && s.unmatchedMinor === "0";
+  // M117: past the Store's closing time the business day is still open in the books only.
+  const closedForTheNight =
+    closesAt !== null && Date.parse(report.generatedAt) >= Date.parse(closesAt);
+  const region = useRef<HTMLDivElement>(null);
+  return (
+    <div className="tonight" ref={region}>
+      <header className="tonight__head">
+        <h2>{t("Today's summary · {date}", { date: businessDateText(report.from) })}</h2>
+        <p>
+          <span
+            className="tonight__status"
+            data-open={day?.status === "Open" && !closedForTheNight}
+          >
+            {day?.status !== "Open"
+              ? t("Day closed")
+              : closedForTheNight
+                ? // Batch 64: when it was read is the page's one "Updated 14:02" stamp.
+                  t("Closed · today's books still open")
+                : t("Open now")}
+          </span>{" "}
+          <span className="tonight__detail">
+            {t("Business day from {startsAt}", {
+              startsAt: storeTime(report.startsAt, report.timeZone, true),
+            })}
+          </span>
+        </p>
+      </header>
+
+      <section aria-labelledby="tonight-sales" className="tonight__section">
+        <h3 id="tonight-sales">
+          {t("Sales")}{" "}
+          <span className="tonight__detail">{t("Since opening, paid and comped in full")}</span>
+        </h3>
+        <dl>
+          <Row label={t("Gross sales")} value={money(s.grossSalesMinor)} />
+          <Row
+            label={t("Comps and discounts by a manager")}
+            detail={
+              countOf(s.compCount, "portion") +
+              (s.compsWithTaxMinor === s.compsMinor
+                ? ""
+                : " · " + t("({amount} with tax)", { amount: money(s.compsWithTaxMinor) }))
+            }
+            value={minus(s.compsMinor)}
+          />
+          {/* v15 M130: a guest's points are their own balance, not a manager's comp. */}
+          {s.pointsUsedMinor !== "0" ? (
+            <Row
+              label={t("Points used")}
+              detail={countOf(s.pointsCount, "dish")}
+              value={minus(s.pointsUsedMinor)}
+            />
+          ) : null}
+          {s.discountsMinor !== "0" ? (
+            <Row label={t("Discounts")} value={minus(s.discountsMinor)} />
+          ) : null}
+          <Row label={t("Net sales")} value={money(s.netSalesMinor)} strong />
+          {s.taxes.map((tax) => (
+            <Row
+              key={tax.label}
+              label={t("Tax · {label}", { label: tax.label })}
+              value={money(tax.amountMinor)}
+            />
+          ))}
+          {s.serviceChargesMinor !== "0" ? (
+            <Row label={t("Service charges")} value={money(s.serviceChargesMinor)} />
+          ) : null}
+          {s.unmatchedMinor !== "0" ? (
+            <Row label={t("Paid but not matched to items")} value={money(s.unmatchedMinor)} />
+          ) : null}
+        </dl>
+      </section>
+
+      <section aria-labelledby="tonight-takings" className="tonight__section">
+        <h3 id="tonight-takings">
+          {t("Taken, by payment method")}{" "}
+          <span className="tonight__detail">{t("Tips shown apart")}</span>
+        </h3>
+        <table className="tonight__methods">
+          <thead>
+            <tr>
+              <th scope="col">{t("Method")}</th>
+              <th scope="col">{t("Payments")}</th>
+              <th scope="col">{t("Tips")}</th>
+              <th scope="col">{t("Taken")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {[online, machine, cash].map((row, index) =>
+              row === null ? null : (
+                <tr key={index}>
+                  <th scope="row">{channelText[row.channel]}</th>
+                  <td>{row.paymentCount}</td>
+                  <td>{money(row.tipsMinor)}</td>
+                  <td>{money(row.collectedMinor)}</td>
+                </tr>
+              ),
+            )}
+          </tbody>
+        </table>
+        {/* Batch 63 F52 (RA-01, RA-09): the money column is one sum, line by line: the payment
+            methods, what they took in all, the refunds, and what stays. The till checks follow in
+            a part of their own, so no refund is taken off twice. */}
+        <dl>
+          <Row label={t("Total taken")} value={money(s.collectedMinor)} strong />
+          <Row
+            label={t("Refunds")}
+            detail={countOf(s.refundCount, "refund")}
+            value={minus(s.refundsMinor)}
+          />
+          <Row label={t("Net taken")} value={money(s.netCollectedMinor)} strong />
+          {/* v15 M45 (Owner rule 6): the sales and tax that stay once every refund is taken off. */}
+          <Row label={t("Net sales after refunds")} value={money(s.netSalesAfterRefundsMinor)} />
+          <Row label={t("Tax after refunds")} value={money(s.taxAfterRefundsMinor)} />
+          {s.moneyTakenBackCount > 0 ? (
+            // WP-2423 M163: its own line, never less refunds or a sale; in the drawer and batch.
+            <Row
+              label={t("Money taken back after refunds made by mistake")}
+              detail={t("Counted in the cash and the card-machine batch")}
+              value={money(s.moneyTakenBackMinor)}
+            />
+          ) : null}
+        </dl>
+      </section>
+
+      {/* Batch 63 F52: the card machine and the drawer, each in Settlement's three lines, so the
+          figure staff compare with the batch slip or count in the drawer is a printed line. */}
+      <section aria-labelledby="tonight-check" className="tonight__section">
+        <h3 id="tonight-check">{t("Check against the machine and drawer")}</h3>
+        {machine !== null ? (
+          <>
+            <dl aria-label={t("Card machine")}>
+              <Row label={t("Taken on card machine")} value={money(machine.collectedMinor)} />
+              <Row
+                label={t("Refunded on card machine")}
+                detail={countOf(machine.refundCount, "refund")}
+                value={less(machine.refundsMinor)}
+              />
+              {machine.moneyTakenBackCount > 0 ? (
+                <Row
+                  label={t("Charged back on card machine")}
+                  detail={t("Money taken back after a refund made by mistake")}
+                  value={money(machine.moneyTakenBackMinor)}
+                />
+              ) : null}
+              <Row
+                label={t("Card machine net")}
+                detail={t("Compare with the machine's batch total")}
+                value={money(machineNet)}
+                strong
+              />
+            </dl>
+            {/* Owner addition (b), v15 M57: the batch also holds the Store's own register. */}
+            <p className="tonight__note">
+              {t(
+                "Tables and counter, tips included. The machine's batch also holds card sales rung up on your own register, so it can be higher.",
+              )}
+            </p>
+          </>
+        ) : null}
+        {cash !== null &&
+        (cash.paymentCount > 0 || cash.refundCount > 0 || cash.moneyTakenBackCount > 0) ? (
+          <dl aria-label={t("Cash")}>
+            <Row
+              label={t("Cash received")}
+              // RA-09: the rounding is inside the cash received, never a line taken off it.
+              detail={
+                cash.cashRoundingMinor === "0"
+                  ? null
+                  : t("of which cash rounding {amount}", {
+                      amount: signedMoney(cash.cashRoundingMinor),
+                    })
+              }
+              value={money(cash.collectedMinor)}
+            />
+            <Row
+              label={t("Cash refunds")}
+              detail={countOf(cash.refundCount, "refund")}
+              value={less(cash.refundsMinor)}
+            />
+            {cash.moneyTakenBackCount > 0 ? (
+              <Row
+                label={t("Cash taken back")}
+                detail={t("Money taken back after a refund made by mistake")}
+                value={money(cash.moneyTakenBackMinor)}
+              />
+            ) : null}
+            <Row label={t("Net cash")} value={money(drawer)} strong />
+          </dl>
+        ) : null}
+        {/* Owner addition (c): the drawer also holds the merchant's own register cash. */}
+        <p className="tonight__note">
+          {t(
+            "The cash drawer also holds cash taken on your own register. This figure is only the cash this system recorded (tables and counter orders): count the two apart.",
+          )}
+        </p>
+      </section>
+
+      {/* RA-11: every row keeps the dot's column, so table names line up with or without one. */}
+      <section aria-labelledby="tonight-open" className="tonight__section tonight__tables">
+        <h3 id="tonight-open">
+          {t("Tables not paid yet")}{" "}
+          <span className="tonight__detail">
+            {open.length === 0
+              ? // RA-11: tables still open from earlier days are listed right below, so "every
+                // table" says it is tonight's.
+                earlierTables.length > 0
+                ? t("Tonight: every table is paid")
+                : t("Every table is paid")
+              : t("{tables} · {amount} to take before closing", {
+                  tables: countOf(open.length, "table"),
+                  amount: money(openOwedMinor.toString()),
+                })}
+          </span>
+        </h3>
+        {open.length > 0 ? (
+          <>
+            <dl>
+              {open.map((table) => (
+                <Row
+                  key={table.tableLabel}
+                  tone="action"
+                  label={t("Table {table}", { table: saidTable(table.tableLabel) })}
+                  detail={
+                    (table.phase === "Closing" ? t("Checking out") : t("Seated")) +
+                    " · " +
+                    t("open {open}", { open: elapsedText(table.openedMinutes) }) +
+                    (table.standing === "RoundUnpaid" ? " · " + t("Round waiting for payment") : "")
+                  }
+                  value={money(table.owedMinor)}
+                />
+              ))}
+            </dl>
+            <p className="tonight__links">
+              <Link to="/operations/dining">{t("Go to Tables")}</Link>
+            </p>
+            <p className="tonight__note">
+              {t(
+                "Take each table's payment before closing. If guests left without paying, a manager or the owner records it on the table.",
+              )}
+            </p>
+          </>
+        ) : null}
+        {paidSeated.length > 0 ? (
+          <dl>
+            <Row
+              label={t("Paid, guests still seated")}
+              detail={countOf(paidSeated.length, "table")}
+              value={tableNames(paidSeated)}
+              muted
+              list
+            />
+          </dl>
+        ) : null}
+        {nothingOrdered.length > 0 ? (
+          <dl>
+            <Row
+              label={t("Seated, nothing ordered")}
+              detail={countOf(nothingOrdered.length, "table")}
+              value={tableNames(nothingOrdered)}
+              muted
+              list
+            />
+          </dl>
+        ) : null}
+        {nothingToCollect.length > 0 ? (
+          <dl>
+            <Row
+              label={t("Cancelled, nothing to collect")}
+              detail={countOf(nothingToCollect.length, "table")}
+              value={tableNames(nothingToCollect)}
+              muted
+              list
+            />
+          </dl>
+        ) : null}
+        {comped.length > 0 ? (
+          <dl>
+            <Row
+              label={t("Comped by a manager, nothing to collect")}
+              detail={countOf(comped.length, "table")}
+              value={tableNames(comped)}
+              muted
+              list
+            />
+          </dl>
+        ) : null}
+        {earlierTables.length > 0 ? (
+          <>
+            <h4 className="tonight__subhead">
+              {t("From earlier days")}{" "}
+              <span className="tonight__detail">
+                {t("{tables} · not in today's figures", {
+                  tables: countOf(earlierTables.length, "table"),
+                })}
+              </span>
+            </h4>
+            <dl>
+              {earlierTables.map((table) => (
+                <Row
+                  key={table.tableLabel}
+                  tone={table.owedMinor === "0" ? undefined : "action"}
+                  label={t("Table {table}", { table: saidTable(table.tableLabel) })}
+                  detail={
+                    standingText(table) +
+                    " · " +
+                    t("open {open}", { open: elapsedText(table.openedMinutes) })
+                  }
+                  value={money(table.owedMinor)}
+                />
+              ))}
+            </dl>
+            <p className="tonight__note">
+              {t(
+                "Opened on an earlier day and never closed. On Tables, take the payment or record that the guests left without paying, then close each one. Nothing is closed or written off by itself.",
+              )}
+            </p>
+            <p className="tonight__links">
+              <Link to="/operations/dining">{t("Go to Tables")}</Link>
+            </p>
+          </>
+        ) : null}
+        {s.unpaidWriteOffCount > 0 ? (
+          <dl>
+            <Row
+              label={t("Guests left without paying (written off)")}
+              detail={countOf(s.unpaidWriteOffCount, "table") + " · " + t("not taken")}
+              value={money(s.unpaidWriteOffMinor)}
+            />
+          </dl>
+        ) : null}
+      </section>
+
+      <section aria-labelledby="tonight-cancelled" className="tonight__section">
+        <h3 id="tonight-cancelled">
+          {t("Refunds and cancellations")}{" "}
+          <span className="tonight__detail">{t("Listed only, not sales")}</span>
+        </h3>
+        <dl>
+          <Row
+            label={t("Refunds")}
+            detail={countOf(s.refundCount, "refund")}
+            value={money(s.refundsMinor)}
+          />
+          {s.cancelledInFullCount > 0 ? (
+            <Row
+              label={t("Orders cancelled or rejected and refunded in full")}
+              detail={
+                countOf(s.cancelledInFullCount, "order") +
+                " · " +
+                t("taken and given back") +
+                " · " +
+                t("The day-end settlement counts these payments and their refunds")
+              }
+              value={money(s.cancelledInFullMinor)}
+            />
+          ) : null}
+          <Row
+            label={t("Dishes taken off a bill before payment")}
+            detail={countOf(c.removedBeforePayment.dishCount, "dish")}
+            value={money(c.removedBeforePayment.amountMinor)}
+          />
+          {c.cancelledAfterPayment.dishCount > 0 ? (
+            <Row
+              label={t("Dishes cancelled after payment (refunded)")}
+              detail={
+                countOf(c.cancelledAfterPayment.dishCount, "dish") +
+                // v15 2026-11-01: these dishes include the cancelled orders' (one refund, not two).
+                (s.cancelledInFullCount > 0
+                  ? " · " + t("includes the cancelled orders above: the same money, not extra")
+                  : "")
+              }
+              value={money(c.cancelledAfterPayment.amountMinor)}
+            />
+          ) : null}
+          <Row
+            label={t("Rounds and orders cancelled unpaid")}
+            detail={
+              countOf(c.cancelledUnpaid.roundCount, "round") +
+              " · " +
+              countOf(c.cancelledUnpaid.dishCount, "dish")
+            }
+            value={money(c.cancelledUnpaid.amountMinor)}
+          />
+        </dl>
+        {/* DEC-PAID-ORDER-AUTO-ACCEPT: decided without a manager, so each is named here. */}
+        {summary.paidOrderEvents.length === 0 ? null : (
+          <dl aria-label={t("Paid orders sent straight to the kitchen")}>
+            {summary.paidOrderEvents.map((event) => (
+              <Row
+                key={event.kind + event.orderNumber + event.at}
+                label={tonightPaidOrderEventText(event, report.from)}
+                detail={tonightPaidOrderEventDetail(event)}
+                value={storeTime(event.at, report.timeZone)}
+              />
+            ))}
+          </dl>
+        )}
+      </section>
+
+      <section aria-labelledby="tonight-match" className="tonight__section">
+        <h3 id="tonight-match">
+          {matches
+            ? t("Matches the day-end settlement")
+            : t("Doesn't match the day-end settlement")}
+        </h3>
+        {matches ? null : (
+          <p role="alert" className="command-error">
+            {t(
+              "Some of today's payments are not counted in these figures yet. Refresh; if it stays, check the day in Settlement and tell the manager before closing.",
+            )}
+          </p>
+        )}
+        <p className="tonight__note">
+          {t(
+            "These are the reports' figures for today so far, from the same records as the settlement made when this business day ends. Payments taken after the business day ends count on the next day.",
+          )}
+        </p>
+        <p className="tonight__links">
+          <Link to="/app/operations/payment-reconciliation">{t("Settlement")}</Link>
+          <button
+            type="button"
+            onClick={() => {
+              // M50: the summary prints alone, never a white page.
+              if (region.current !== null) printRegion(region.current, "tonight-summary");
+            }}
+          >
+            {t("Print")}
+          </button>
+        </p>
+      </section>
+    </div>
+  );
+}
+
+type TonightState =
+  | { readonly kind: "Loading" }
+  | { readonly kind: "Ready"; readonly summary: TonightSummary; readonly stale: boolean }
+  | { readonly kind: "PermissionDenied" | "Busy" | "Unavailable" };
+
+/**
+ * The "Tonight" tab: reads the closing summary when shown and on Refresh (`revision`). If the
+ * store system can't be reached, the last figures stay with their time and what staff do
+ * instead (operating continuity; nothing is kept in the browser beyond this page).
+ */
+export function TonightReport({
+  client,
+  revision,
+  onRefused,
+  onRead,
+}: {
+  readonly client: Pick<StoreReportsClient, "tonight">;
+  readonly revision: number;
+  /** Batch 40: told whether the server refused this person the read (the page drops its tabs). */
+  readonly onRefused?: (refused: boolean) => void;
+  /**
+   * Batch 64 (v15 b63: Reports had no "Updated 14:02", only "Open · as of 12:31" in the body):
+   * told when the figures shown were read, and whether they may be out of date, for the page's
+   * one stamp. Null while nothing is shown.
+   */
+  readonly onRead?: (read: { readonly at: string; readonly stale: boolean } | null) => void;
+}) {
+  const [state, setState] = useState<TonightState>({ kind: "Loading" });
+  const refused = state.kind === "PermissionDenied";
+  useEffect(() => onRefused?.(refused), [onRefused, refused]);
+  const readAt = state.kind === "Ready" ? state.summary.report.generatedAt : null;
+  const readStale = state.kind === "Ready" && state.stale;
+  useEffect(
+    () => onRead?.(readAt === null ? null : { at: readAt, stale: readStale }),
+    [onRead, readAt, readStale],
+  );
+  const businessDay = useStoreBusinessDay();
+  useEffect(() => {
+    const controller = new AbortController();
+    client
+      .tonight(controller.signal)
+      .then((summary) => {
+        if (!controller.signal.aborted) setState({ kind: "Ready", summary, stale: false });
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        // Today is never before the Store's records, so "not covered" here is an outage too.
+        const code =
+          error instanceof StoreReportsClientError && error.code !== "NotCovered"
+            ? error.code
+            : "Unavailable";
+        setState((prior) =>
+          prior.kind === "Ready" && code !== "PermissionDenied"
+            ? { ...prior, stale: true }
+            : { kind: code },
+        );
+      });
+    return () => controller.abort();
+  }, [client, revision]);
+  useBrowserOffline(() =>
+    setState((prior) => (prior.kind === "Ready" ? { ...prior, stale: true } : prior)),
+  );
+  if (state.kind === "Loading")
+    return (
+      <p role="status" className="bop-muted">
+        {t("Reading today's figures…")}
+      </p>
+    );
+  if (state.kind === "PermissionDenied")
+    // Batch 38 review: the same refusal as every page, so a kitchen display is led back.
+    return <NoAccessNotice />;
+  if (state.kind !== "Ready")
+    return (
+      <TonightOffline at={null} timeZone={undefined}>
+        {state.kind === "Busy"
+          ? t("The store's records are busy with orders and payments. Refresh in a minute.")
+          : null}
+      </TonightOffline>
+    );
+  return (
+    <>
+      {state.stale ? (
+        <TonightOffline
+          at={state.summary.report.generatedAt}
+          timeZone={state.summary.report.timeZone}
+        />
+      ) : null}
+      <TonightSummaryView summary={state.summary} closesAt={businessDay?.closesAt ?? null} />
+    </>
+  );
+}
+
+/** What to do while tonight's figures can't be read (Figma 47-2, 390 offline). */
+function TonightOffline({
+  at,
+  timeZone,
+  children,
+}: {
+  readonly at: string | null;
+  readonly timeZone: string | undefined;
+  readonly children?: ReactNode;
+}) {
+  return (
+    <section
+      className="tonight__offline"
+      role="status"
+      aria-label={t("Can't reach the store system")}
+    >
+      <p className="tonight__offline-title">
+        {at === null
+          ? t("Can't reach the store system")
+          : t("Can't reach the store system · showing the figures from {time}", {
+              time: storeTime(at, timeZone),
+            })}
+      </p>
+      {children ? <p>{children}</p> : null}
+      <p>
+        {t(
+          "Card and cash taken since then are not counted yet. At closing, check the card machine's batch and the cash this system recorded against your paper slips; once the slips are entered, this page and the settlement made when this business day ends include them.",
+        )}
+      </p>
+    </section>
+  );
+}

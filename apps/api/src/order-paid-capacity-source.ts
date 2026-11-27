@@ -1,0 +1,93 @@
+import type { ConsumerTransaction } from "@bop/eventing";
+import { createPostgresDiningCheckoutCommitmentStore } from "@rms/dining";
+import { createPostgresAsapCapacityStore } from "@rms/fulfillment";
+import { parsePaymentIntentCreationRecord } from "@rms/payment";
+import {
+  parseOrderingReference,
+  parseOrderingInstant,
+  OrderPaymentOutcomeError,
+} from "@rms/ordering";
+
+/**
+ * WP-2423 table-move-payment (v15 2026-11-06): the owner failure behind "unavailable" rides along
+ * as the error's `cause`, so the operator's log line names its code (codes only, never text or
+ * references; tooling/environment/pilot-unexpected.mjs). The answer to the caller is unchanged.
+ */
+const unavailable = (cause?: unknown): never => {
+  if (cause instanceof OrderPaymentOutcomeError) throw cause;
+  const error = new OrderPaymentOutcomeError("ORDER_PAYMENT_OUTCOME_SOURCE_UNAVAILABLE");
+  if (cause !== undefined)
+    Object.defineProperty(error, "cause", { value: cause, enumerable: false, configurable: true });
+  throw error;
+};
+
+/**
+ * Caller authorizes Order scope and holds its transaction; capacity state is not a release decision.
+ * A dine-in round already paid is read wherever its party sits now (WP-2423 M04: staff moved the
+ * table after the guest paid and before staff accepted it).
+ */
+export async function readOrderPaidCapacity(
+  transaction: ConsumerTransaction,
+  scopeInput: { tenantReference: string; brandReference: string; storeReference: string },
+  paymentValue: unknown,
+  orderType: "DineIn" | "Pickup",
+  observedAtValue: string,
+) {
+  try {
+    const scope = {
+      tenantReference: String(parseOrderingReference(scopeInput.tenantReference)),
+      brandReference: String(parseOrderingReference(scopeInput.brandReference)),
+      storeReference: String(parseOrderingReference(scopeInput.storeReference)),
+    };
+    const payment = parsePaymentIntentCreationRecord(paymentValue);
+    const p = payment.intent.preparation;
+    const observedAt = parseOrderingInstant(observedAtValue);
+    if (
+      String(p.brandReference) !== scope.brandReference ||
+      String(p.storeReference) !== scope.storeReference
+    )
+      return unavailable();
+    const bound = {
+      run: async <T>(work: (tx: ConsumerTransaction) => Promise<T>) => work(transaction),
+    };
+    const expected = {
+      guestSessionReference: p.guestSessionReference,
+      submissionReference: p.submissionReference,
+      cartReference: p.sourceCartReference,
+      cartVersion: p.sourceCartVersion,
+      quoteReference: p.quoteReference,
+      orderReference: p.orderReference,
+      orderBatchReference: p.orderBatchReference,
+      paymentOperationReference: payment.intent.paymentOperationReference,
+      paymentRequestedAt: p.committedAt,
+      capacityExpiresAt: p.capacityExpiresAt,
+    };
+    const matches = (value: object) =>
+      Object.entries(expected).every(([key, reference]) => Reflect.get(value, key) === reference);
+    if (orderType === "DineIn") {
+      const result = await createPostgresDiningCheckoutCommitmentStore(bound, scope, {
+        now: () => observedAt,
+      }).withPaidFacts(p.capacityAllocationReference, async (_, facts) => {
+        if (!matches(facts.commitment)) return unavailable();
+        return Object.freeze({ owner: "Dining" as const, ...facts });
+      });
+      return result ?? unavailable();
+    }
+    if (orderType !== "Pickup") return unavailable();
+    const result = await createPostgresAsapCapacityStore(
+      bound,
+      { brandReference: scope.brandReference, storeReference: scope.storeReference },
+      { now: () => observedAt },
+    ).withCurrentSubmission(p.submissionReference, async (_, commitment) => {
+      if (
+        String(commitment.allocationReference) !== String(p.capacityAllocationReference) ||
+        !matches(commitment)
+      )
+        return unavailable();
+      return Object.freeze({ owner: "AsapPickup" as const, commitment });
+    });
+    return result ?? unavailable();
+  } catch (error) {
+    return unavailable(error);
+  }
+}

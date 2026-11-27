@@ -24,7 +24,11 @@ const REQUIRED_KEYS = [
   "BOP_RMS_MERCHANT_WEB_PORT",
   "BOP_RMS_CUSTOMER_PWA_PORT",
 ];
-const OPTIONAL_KEYS = ["BOP_RMS_POSTGRES_SSL_CA_FILE"];
+const OPTIONAL_KEYS = [
+  "BOP_RMS_POSTGRES_SSL_CA_FILE",
+  "BOP_RMS_WORKER_CONFIGURATION",
+  "BOP_RMS_API_CONFIGURATION",
+];
 
 const PORT_KEYS = [
   "BOP_RMS_POSTGRES_PORT",
@@ -215,6 +219,29 @@ function portAvailable(port) {
   });
 }
 
+export function resolveWorkerConfiguration(root, value, label = "Worker") {
+  if (value === undefined) return undefined;
+  try {
+    const realRoot = fs.realpathSync(root);
+    const resolved = fs.realpathSync(path.resolve(realRoot, value));
+    const relative = path.relative(realRoot, resolved);
+    if (
+      !relative ||
+      relative === ".." ||
+      relative.startsWith(".." + path.sep) ||
+      path.isAbsolute(relative) ||
+      ![".js", ".mjs"].includes(path.extname(resolved)) ||
+      !fs.statSync(resolved).isFile()
+    )
+      throw new Error("invalid configuration");
+    return resolved;
+  } catch {
+    throw new Error(
+      label + " configuration must be an existing JavaScript file inside the checkout",
+    );
+  }
+}
+
 export async function loadEnvironment({ checkPorts = false, envFile, root }) {
   const toolchain = validateToolchain(root);
   const absoluteEnvFile = path.resolve(root, envFile);
@@ -232,6 +259,15 @@ export async function loadEnvironment({ checkPorts = false, envFile, root }) {
       if (!(await portAvailable(port))) fail(`${key} port ${port} is already in use`);
   }
   return {
+    apiConfiguration: resolveWorkerConfiguration(
+      toolchain.realRoot,
+      values.BOP_RMS_API_CONFIGURATION,
+      "API",
+    ),
+    workerConfiguration: resolveWorkerConfiguration(
+      toolchain.realRoot,
+      values.BOP_RMS_WORKER_CONFIGURATION,
+    ),
     envFile: absoluteEnvFile,
     projectName: values.BOP_RMS_COMPOSE_PROJECT,
     root: toolchain.realRoot,

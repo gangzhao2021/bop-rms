@@ -53,6 +53,26 @@ export interface RevokeBrowserSessionCommand {
   readonly observedAt: CanonicalInstant;
 }
 
+/**
+ * WP-2423 Q18: genuine staff activity on a Session (or, with `extend: false`, a read of its
+ * deadlines). The store checks the bound CSRF selector and, when extending, slides the idle
+ * deadline (bounded by the absolute deadline) at most once per write interval. Activity is
+ * advisory: when the row is busy the write is skipped, never failed. Errors are
+ * `BROWSER_SESSION_ENDED` (revoked, expired, unknown), `BROWSER_SESSION_DENIED` (CSRF mismatch) or
+ * `BROWSER_SESSION_UNAVAILABLE` (transient; retry later).
+ */
+export interface RecordBrowserSessionActivityCommand {
+  readonly selectorHash: SelectorHash;
+  readonly csrfSelectorHash: SelectorHash;
+  readonly observedAt: CanonicalInstant;
+  readonly extend: boolean;
+}
+
+export interface BrowserSessionActivityResult {
+  readonly session: AuthenticationSession;
+  readonly recorded: boolean;
+}
+
 export interface BrowserSessionStorePort {
   createAuthorizationTransaction(transaction: AuthorizationTransaction): Promise<void>;
   consumeAuthorizationTransaction(
@@ -62,4 +82,8 @@ export interface BrowserSessionStorePort {
   resolveSession(selectorHash: SelectorHash): Promise<BrowserSessionRecord | null>;
   rotateSession(command: RotateBrowserSessionCommand): Promise<BrowserSessionRecord>;
   revokeSession(command: RevokeBrowserSessionCommand): Promise<AuthenticationSession | null>;
+  /** Optional: stores without sliding idle expiry keep the deadline fixed at creation. */
+  recordActivity?(
+    command: RecordBrowserSessionActivityCommand,
+  ): Promise<BrowserSessionActivityResult>;
 }

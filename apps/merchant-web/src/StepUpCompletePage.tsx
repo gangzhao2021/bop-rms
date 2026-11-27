@@ -1,0 +1,100 @@
+import { t } from "./i18n/i18n.js";
+import { useEffect } from "react";
+import { Link, useLocation } from "react-router";
+import {
+  announceStepUpResult,
+  parseStepUpResult,
+  safeReturnPath,
+  type ChannelFactory,
+  type StepUpResult,
+} from "./step-up-sign-in.js";
+
+/** How long the page waits for `window.close()` before it is known not to be a popup. */
+export const STEP_UP_CLOSE_WAIT_MS = 300;
+
+export const stepUpCompleteText: Record<StepUpResult, string> = {
+  verified: t("You're verified. You can go back to what you were doing."),
+  cancelled: t("Sign-in was cancelled."),
+  failed: t("We couldn't confirm it's you."),
+  unavailable: t(
+    "Signing in again isn't available right now, so nothing was changed. Try again in a few minutes; if it keeps happening, tell your manager.",
+  ),
+};
+
+export interface StepUpCompleteWindow {
+  close(): void;
+  readonly closed: boolean;
+  readonly location: { replace(url: string): void };
+}
+
+/**
+ * The page's effect, apart from React: tell the page that opened the sign-in window how it went,
+ * close this window, and — when it was not a popup (it is still open shortly after) — go back to
+ * the page the staff member left. A failed or unavailable check stays here so its message can be
+ * read.
+ */
+export function finishStepUp(
+  result: StepUpResult | null,
+  returnTo: string,
+  target: StepUpCompleteWindow,
+  channel?: ChannelFactory | null,
+  schedule: (run: () => void, ms: number) => unknown = setTimeout,
+): void {
+  if (result === null) return;
+  announceStepUpResult(result, channel);
+  try {
+    target.close();
+  } catch {
+    // Not a window this page may close; it goes back below.
+  }
+  if (result === "failed" || result === "unavailable") return;
+  schedule(() => {
+    if (!target.closed) target.location.replace(returnTo);
+  }, STEP_UP_CLOSE_WAIT_MS);
+}
+
+/** WP-2423 DEC-COGNITO-STORE-STAFF: where the "confirm it is you" sign-in window ends. */
+export function StepUpCompleteView({
+  result,
+  returnTo,
+}: {
+  readonly result: StepUpResult | null;
+  readonly returnTo: string;
+}) {
+  return (
+    <main id="main-content" tabIndex={-1} className="bop-shell__main staff-switch">
+      <header className="staff-switch__header">
+        <p className="staff-switch__brand">
+          <strong aria-label="BOP">BOP</strong>
+        </p>
+        <h1>{t("Confirm it is you")}</h1>
+      </header>
+      <section className="staff-switch__panel" aria-label={t("Result")}>
+        {result === null ? (
+          <p>{t("This sign-in check has ended.")}</p>
+        ) : (
+          <p role={result === "failed" || result === "unavailable" ? "alert" : "status"}>
+            {stepUpCompleteText[result]}
+          </p>
+        )}
+        <p>
+          <Link className="staff-sign-in__link" to={returnTo}>
+            {t("Go back")}
+          </Link>
+        </p>
+      </section>
+    </main>
+  );
+}
+
+export function StepUpCompletePage({ channel }: { readonly channel?: ChannelFactory | null }) {
+  const { search } = useLocation();
+  const query = new URLSearchParams(search);
+  const result = parseStepUpResult(query.get("result"));
+  const returnTo = safeReturnPath(query.get("returnTo"));
+  useEffect(() => {
+    finishStepUp(result, returnTo, window, channel);
+    // Once per arrival.
+  }, []);
+  return <StepUpCompleteView result={result} returnTo={returnTo} />;
+}

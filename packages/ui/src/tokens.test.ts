@@ -23,6 +23,23 @@ describe("BOP Pilot Neutral tokens", () => {
     expect(contrast(color("text-default"), color("surface-canvas"))).toBeGreaterThanOrEqual(4.5);
     expect(contrast(color("on-primary"), color("brand-primary"))).toBeGreaterThanOrEqual(4.5);
     expect(contrast(color("danger"), color("surface-default"))).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(color("success"), color("surface-default"))).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(color("warning"), color("surface-default"))).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(color("on-primary"), color("danger"))).toBeGreaterThanOrEqual(4.5);
+    // Owner 2026-10-26: the accent is text on white and the fill behind white button words.
+    expect(contrast(color("accent"), color("surface-default"))).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(color("on-accent-fill"), color("accent"))).toBeGreaterThanOrEqual(4.5);
+  });
+  it("keeps the red and green marks (dots, outlines, bars) at 3:1 on white", () => {
+    for (const mark of ["danger-mark", "success-mark"])
+      for (const surface of ["surface-default", "surface-raised"])
+        expect(
+          contrast(color(mark), color(surface)),
+          `${mark} on ${surface}`,
+        ).toBeGreaterThanOrEqual(3);
+  });
+  it("draws a control's line (field bottom line, button outline) at 3:1 on white (WCAG 1.4.11)", () => {
+    expect(contrast(color("border-control"), color("surface-default"))).toBeGreaterThanOrEqual(3);
   });
   it("keeps keyboard, motion, and touch baselines mechanical", () => {
     expect(css).toContain(":focus-visible");
@@ -30,5 +47,17 @@ describe("BOP Pilot Neutral tokens", () => {
     expect(css).toContain("min-height: 44px");
     expect(css).toContain(".bop-skip-link");
     expect(css).not.toMatch(/https?:\/\//i);
+  });
+  it("paints the skip link only while it has keyboard focus (2026-10-21 live check)", () => {
+    const rule = (selector: string) =>
+      new RegExp(`(?:^|\\n)${selector.replace(/\./gu, "\\.")} \\{([^}]*)\\}`, "u").exec(css)?.[1] ??
+      "";
+    expect(rule(".bop-skip-link")).toContain("clip-path: inset(50%);");
+    expect(rule(".bop-skip-link")).toContain("position: fixed;");
+    expect(rule(".bop-skip-link:focus-visible")).toContain("clip-path: none;");
+    expect(rule(".bop-skip-link:focus-visible")).toContain("transform: translateY(0);");
+  });
+  it("defines the shared spacing token consumed by both web surfaces", () => {
+    expect(css).toMatch(/--bop-space-5:\s*1\.25rem;/u);
   });
 });

@@ -1,3 +1,4 @@
+import { t, wordGap } from "../i18n/i18n.js";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import {
   createConnectivityController,
@@ -35,22 +36,26 @@ export function ConnectivityBanner({
     >
       {state.status === "offline" ? (
         <>
-          <strong>You are offline.</strong>{" "}
-          <span>
-            Transaction and identity actions are unavailable. Nothing will run or replay in the
-            background.
-          </span>
+          {/* Batch 63 (F10): one plain message, with what to do now (ask staff), instead of
+              "paused" and "sent in the background". */}
+          <strong>{t("No connection.")}</strong>
+          {wordGap()}
+          <span>{t("Your cart is kept on this phone. To order now, ask a staff member.")}</span>
         </>
       ) : (
         <>
           <div>
-            <strong>Connection restored.</strong>{" "}
+            <strong>{t("Connection restored.")}</strong>
+            {wordGap()}
             <span>
-              Review the current screen and retry explicitly. No action ran automatically.
+              {/* WP-2423 M17: a payment confirmed just before the drop may have gone through; M94: the page reads again by itself. */}
+              {t(
+                "Updating this page… It will show anything that went through before the connection dropped.",
+              )}
             </span>
           </div>
           <button type="button" onClick={() => controller.dismissRestored()}>
-            Dismiss
+            {t("Dismiss")}
           </button>
         </>
       )}

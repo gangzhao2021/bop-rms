@@ -1,0 +1,1881 @@
+import { createTablePaymentClient } from "./table-payment-client.js";
+import {
+  openBillParts,
+  tableBillOutcome,
+  type ClosedBillPaid,
+  type OpenBillParts,
+} from "./table-bill-outcome.js";
+import {
+  dateLocale,
+  keepWords,
+  saidTable,
+  t,
+  tWords,
+  useReloadOnLanguageChange,
+  wordGap,
+} from "../i18n/i18n.js";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
+import { Link, useLocation, useNavigate } from "react-router";
+import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
+import {
+  formatClockTime,
+  formatMoney,
+  formatSignedMoney,
+  keepTimeTogether,
+} from "../journey/format.js";
+import { staffCancellationReasonText } from "../order-status/OrderStatusPage.js";
+import { orderStatusText } from "../journey/messages.js";
+import {
+  createHttpDiningSessionClient,
+  DiningSessionClientError,
+  type DiningMoney,
+  type DiningRound,
+  type DiningRoundPayment,
+  type DiningRoundStatus,
+  type DiningSessionClient,
+  type DiningSessionView,
+} from "./dining-session-client.js";
+import { DiningInvitationPanel } from "./DiningInvitationPanel.js";
+import { TablePayPanel, type TablePayStatus } from "./TablePayPanel.js";
+import {
+  getGuestTableStarter,
+  isGuestTableQuestion,
+  getEndedTableStore,
+  getUnseatedTableWait,
+  isUnseatedTableScan,
+  subscribeCustomerCsrfContext,
+  getCustomerCsrfCredential,
+  getClosedTableOwnReceiptCsrf,
+  getEndedTable,
+} from "../session/customer-transaction-context.js";
+import {
+  OwnPaymentReceiptPanel,
+  SettledOwnPaymentLines,
+  createOwnPaymentReceiptClient,
+  type OwnPaymentReceiptClient,
+} from "./OwnPaymentReceipt.js";
+import {
+  backToWaitingText,
+  tableNotOpenHeading,
+  tableNotOpenWaitText,
+  useGoOnWhenTableOpens,
+} from "../entry/table-wait-away.js";
+import { SettledTableReceiptPanel, type SettledTableReceiptClient } from "./SettledTableReceipt.js";
+import { useBringYourReceiptIntoView, wantsYourReceipt } from "./your-receipt-link.js";
+import {
+  ClosedBillTableCard,
+  EmptyClosedTableCard,
+  MovedTableCard,
+  SettledTableCard,
+} from "./EndedTable.js";
+import { DiningStaffCallPanel } from "./DiningStaffCallPanel.js";
+import type { DiningStaffCallClient } from "./dining-staff-call-client.js";
+import type { DiningInvitationClient } from "./dining-invitation-client.js";
+import { createBrowserCustomerCartClient, type CustomerCartClient } from "../cart/cart-client.js";
+import { createConfigureController, type ConfigureController } from "../menu/configure-state.js";
+import { ConfigureStatus } from "../menu/MenuPage.js";
+import { comboLineAllergenText, comboLineChoices } from "../menu/combo-allergens.js";
+import { usePublishedMenu } from "../menu/menu-line-prices.js";
+import type { CustomerMenuClient, MenuJourneyContext, MenuView } from "../menu/types.js";
+
+/**
+ * WP-2423 D5: when a round was sent. Today's rounds show the time; a round from another day (a
+ * table kept open past midnight, or reopened on a later day) shows its date too.
+ */
+export function roundTime(instant: string, now = Date.now(), locale = dateLocale()): string {
+  const ms = Date.parse(instant);
+  if (!Number.isFinite(ms)) return "";
+  const day = (value: number) => new Date(value).toDateString();
+  if (day(ms) === day(now)) return formatClockTime(instant, locale);
+  return keepTimeTogether(
+    new Intl.DateTimeFormat(locale, {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(new Date(ms)),
+  );
+}
+
+/** Batch 63 (F12): a read this long after "Round N sent" was first shown clears it. */
+const placedLineMs = 10_000;
+
+/** How often the table view re-reads while something at the table is still in progress. */
+export const diningSessionPollIntervalMs = 15_000;
+
+const statusText: Readonly<Record<DiningRoundStatus, string>> = {
+  get WaitingForStaff() {
+    return t("Waiting for staff to confirm");
+  },
+  get AwaitingPayment() {
+    return t("Waiting for payment");
+  },
+  get PaymentFailed() {
+    return t("On hold until paid");
+  },
+  get NotPaidCancelled() {
+    return t("Cancelled — not paid");
+  },
+  get StoreCancelled() {
+    return t("Cancelled by the store");
+  },
+  get Received() {
+    return t("Received by the store");
+  },
+  get Queued() {
+    return t("Sent to the kitchen");
+  },
+  get Preparing() {
+    return t("Being prepared");
+  },
+  get Ready() {
+    return t("Ready — on its way to your table");
+  },
+  get Serving() {
+    return t("Being served");
+  },
+  get Served() {
+    return t("Served");
+  },
+};
+const paymentText: Readonly<Record<DiningRoundPayment, string>> = {
+  get Paid() {
+    return t("Paid");
+  },
+  get Awaiting() {
+    return t("Not paid yet");
+  },
+  get Failed() {
+    return t("Payment failed");
+  },
+  get NotCharged() {
+    return t("Not charged");
+  },
+  get Refunded() {
+    return t("Refunded");
+  },
+  get RefundPending() {
+    return t("Refund on its way");
+  },
+  get OnTableBill() {
+    return t("On the table's bill");
+  },
+};
+/** WP-2423 Q7 slice 2: who ordered a round, in the guest's words (never a staff name). */
+const orderedByText: Readonly<Record<DiningRound["orderedBy"], string>> = {
+  get You() {
+    return t("Ordered by you");
+  },
+  get AnotherGuest() {
+    return t("Ordered by another guest");
+  },
+  get Staff() {
+    return t("Entered by staff");
+  },
+};
+/** b26: statuses whose "Not charged" means the round never was (or is not yet) on the bill. */
+const settledOrWaiting: ReadonlySet<DiningRoundStatus> = new Set([
+  "NotPaidCancelled",
+  "StoreCancelled",
+  "WaitingForStaff",
+]);
+const settled: ReadonlySet<DiningRoundStatus> = new Set([
+  "NotPaidCancelled",
+  "StoreCancelled",
+  "Served",
+]);
+
+const money = (value: DiningMoney) => formatMoney(value.amountMinor, value.currencyCode);
+/** Batch 67: cash rounding as staff read it on the same bill ("+$0.02" / "−$0.03"). */
+const signedMoney = (value: DiningMoney) =>
+  formatSignedMoney(value.amountMinor, value.currencyCode);
+/** Discounts and fees the items carried (total − subtotal − tax), or null when there are none. */
+function adjustments(total: DiningMoney, subtotal: DiningMoney, tax: DiningMoney): string | null {
+  const rest = BigInt(total.amountMinor) - BigInt(subtotal.amountMinor) - BigInt(tax.amountMinor);
+  return rest === 0n ? null : formatMoney(rest, total.currencyCode);
+}
+
+/**
+ * WP-2423 item 8b: a round of only charges staff entered (a per-person charge, corkage): a real bill
+ * lists it as a charge, not as a dish going through the kitchen. A guest who ordered such an item from
+ * the menu keeps the ordinary round: who ordered it and where it is.
+ */
+const staffCharge = (round: DiningRound) => round.charge === true && round.orderedBy === "Staff";
+
+/** v15 2026-10-29: a charge round staff took off a table's unpaid bill (never charged). */
+const chargeTakenOff = (round: DiningRound) =>
+  (round.charge === true || round.tea === true) &&
+  round.status === "StoreCancelled" &&
+  round.payment === "NotCharged";
+
+/**
+ * M91: one dish's progress in the guest's words. Batch 63 (v15 batch 62 review CDI-10, F12/F13):
+ * a dish says nothing while it is where its round is (a round "Sent to the kitchen" over dishes
+ * "Waiting" read as three words for one state); "Served 1 of 2" only while partly served.
+ */
+export function dishProgressText(
+  item: DiningRound["items"][number],
+  roundStatus?: DiningRoundStatus,
+): string | null {
+  const partlyServed = item.servedQuantity > 0 && item.servedQuantity < item.quantity;
+  if (partlyServed)
+    return t("Served {value1} of {quantity}", {
+      value1: String(item.servedQuantity),
+      quantity: String(item.quantity),
+    });
+  const progress = item.progress === "Served" || item.servedQuantity > 0 ? "Served" : item.progress;
+  const sameAsRound: Readonly<Record<string, readonly DiningRoundStatus[]>> = {
+    Served: ["Served", "Serving"],
+    Ready: ["Ready"],
+    Making: ["Preparing"],
+    Waiting: ["Received", "Queued", "WaitingForStaff", "AwaitingPayment", "PaymentFailed"],
+  };
+  if (
+    roundStatus !== undefined &&
+    progress !== undefined &&
+    sameAsRound[progress]?.includes(roundStatus)
+  )
+    return null;
+  if (progress === "Served") return t("Served");
+  if (progress === "Ready") return t("Ready");
+  if (progress === "Making") return t("Being made");
+  return t("Waiting");
+}
+
+/** M41 (Owner default 12): after this long unaccepted, the guest is told to let staff know. */
+export const paidRoundStillWaitingMinutes = 5;
+
+function RoundNote({ round }: { readonly round: DiningRound }) {
+  if (
+    round.awaitingStore === true &&
+    Date.now() - Date.parse(round.submittedAt) >= paidRoundStillWaitingMinutes * 60_000
+  )
+    return (
+      <p className="order-status__warning" role="status">
+        {t("Still waiting? Let a staff member know.")}
+      </p>
+    );
+  if (round.status === "PaymentFailed")
+    return (
+      <p className="order-status__warning" role="status">
+        {round.cancelsAt
+          ? // The sentence's own period: a time ending "p.m." stands in for it, and Chinese has "。".
+            t("This round will be cancelled at {value1}. ", {
+              value1: formatClockTime(round.cancelsAt),
+            })
+          : ""}
+        {t("Ask a staff member if you need help.")}
+      </p>
+    );
+  if (round.status === "NotPaidCancelled")
+    return (
+      <p>
+        {round.stoppedBeforePaying === true
+          ? orderStatusText.roundWithdrawnUnpaid
+          : t("This round never went to the kitchen. No one was charged for it.")}
+      </p>
+    );
+  // WP-2423 item 8 ⑤ decisions 5–6: the round waits for staff before the kitchen, and why.
+  if (round.status === "WaitingForStaff")
+    return (
+      <p role="status">
+        {round.waitingReason === "FirstOrder"
+          ? t("This is the first round from this phone, so staff confirm it before the kitchen.")
+          : t("Many rounds were sent just now, so staff confirm this one before the kitchen.")}
+        {wordGap()}
+        {t("It is not charged until it goes to the kitchen.")}
+      </p>
+    );
+  if (round.status === "StoreCancelled")
+    return (
+      <p>
+        {round.storeCancellationReason
+          ? staffCancellationReasonText[round.storeCancellationReason] + wordGap()
+          : ""}
+        {round.payment === "NotCharged"
+          ? // v15 2026-10-29: a table paying at the end paid nothing for it; nothing is refunded.
+            t("Staff took this round off the bill. It is not charged.")
+          : round.payment === "OnTableBill"
+            ? // b25 final: the kitchen could not make it and no one took it off the bill yet, so
+              // the table is still charged for it; the guest is never told it is not charged.
+              t("This round is still on the table's bill. Ask staff to take it off.")
+            : round.payment === "Refunded"
+              ? t("The payment was refunded.")
+              : round.payment === "Paid"
+                ? // b26 (live25): it was paid and no refund exists yet: never "being refunded".
+                  t("This round was paid and has not been refunded. Ask a staff member.")
+                : t("The payment is being refunded to the card that paid.")}
+      </p>
+    );
+  if (round.status === "AwaitingPayment")
+    return (
+      <>
+        <AwaitingPaymentNote round={round} />
+        {/* WP-2423 abandoned payment: the guest who sent it finishes the same payment here. */}
+        {round.orderedBy === "You" ? (
+          <Link className="dining-session__pay" to="/checkout/payment">
+            {t("Pay for round")} {round.roundNumber}
+          </Link>
+        ) : null}
+      </>
+    );
+  return null;
+}
+
+function AwaitingPaymentNote({ round }: { readonly round: DiningRound }) {
+  return (
+    <p className={round.cancelsAt ? "order-status__warning" : undefined}>
+      {staffCharge(round)
+        ? // A charge doesn't go to a kitchen.
+          t("Pay a staff member on the card machine.")
+        : round.orderedBy === "You"
+          ? t("Finish paying for this round so the kitchen can start it.")
+          : round.orderedBy === "Staff"
+            ? t(
+                "Staff entered this round for your table. Pay them on the card machine and the kitchen starts it.",
+              )
+            : t("The kitchen starts this round once it is paid.")}
+      {/* WP-2423 item 5: a round nobody started paying for is cancelled when its time ends. */}
+      {round.cancelsAt
+        ? t(" If it isn't paid by {value1}, it is cancelled and nobody is charged.", {
+            value1: formatClockTime(round.cancelsAt),
+          })
+        : ""}
+    </p>
+  );
+}
+
+type DiningItem = DiningRound["items"][number];
+
+/**
+ * WP-2423 item 8 ③ (Owner decision 13, "再来一份"): one more of a dish anyone at the table ordered,
+ * with the same choices, goes into this guest's own cart (never the other guest's note). The
+ * menu checks it again; if the dish or a choice is no longer offered, the guest picks it from the
+ * menu instead.
+ */
+function OrderAgainStatus({
+  controller,
+  item,
+}: {
+  readonly controller: ConfigureController;
+  readonly item: DiningItem | null;
+}) {
+  const state = useSyncExternalStore(
+    controller.subscribe,
+    controller.getState,
+    controller.getState,
+  );
+  if (item === null || state.status === "idle") return null;
+  // b39: a dish sold out today is said as that, never as a menu change.
+  const soldOut =
+    state.status === "validation" &&
+    "issueCodes" in state &&
+    state.issueCodes.includes("CATALOG_ITEM_SOLD_OUT");
+  if (soldOut)
+    return (
+      <div className="configure-status" role="alert">
+        <p>{t("{name} is sold out today.", { name: item.displayName })}</p>
+      </div>
+    );
+  if (state.status === "validation" && item.orderAgain !== undefined)
+    return (
+      <div className="configure-status" role="alert">
+        <p>
+          {t("{name} can’t be added as it was ordered — the menu has changed.", {
+            name: item.displayName,
+          })}
+        </p>
+        <Link to={`/menu/items/${item.orderAgain.sellableReference}`}>
+          {t("Choose it from the menu")}
+        </Link>
+      </div>
+    );
+  if (state.status === "added")
+    return (
+      <div className="configure-status configure-status--success" role="status">
+        <p>{t("One more {name} is in your cart.", { name: item.displayName })}</p>
+        <Link className="menu-action" to="/cart">
+          {t("View cart")}
+        </Link>
+      </div>
+    );
+  return <ConfigureStatus state={state} controller={controller} />;
+}
+
+/** A combo line's chosen dishes and what they contain (nothing for other dishes). */
+function ComboLine({
+  menu,
+  again,
+}: {
+  readonly menu: MenuView | null;
+  readonly again: NonNullable<DiningItem["orderAgain"]>;
+}) {
+  const options = again.optionSelections.map((option) => option.optionReference);
+  const dishes = comboLineChoices(menu, again.sellableReference, options);
+  if (dishes === null) return null;
+  return (
+    <>
+      <span className="order-status__item-options">{dishes}</span>
+      <span className="order-status__item-allergens">
+        {comboLineAllergenText(menu, again.sellableReference, options)}
+      </span>
+    </>
+  );
+}
+
+/**
+ * Batch 55 (v15 b54 live): a round's payment once staff closed the bill when the guests left. A
+ * round still on the bill is not owed any more (never "On the table's bill"); under staff's equal
+ * parts, which pay the whole bill and no round in particular, every round says what the parts
+ * did (never one round "Paid" as if that round was what was paid). By dish, a guest's own dish
+ * they paid for stays Paid. Null: the round's own payment says it.
+ */
+function closedRoundPaymentText(
+  round: DiningRound,
+  closed: ClosedBillPaid | null,
+  parts: OpenBillParts | null,
+): string | null {
+  // Batch 56 (v15 b55 live, order 80): while the bill is open, staff's equal parts pay no round
+  // either: every round on the bill says how many parts are paid, and Paid once all of them are.
+  // Batch 59 (v15 b58 live): a part staff gave back in full is not paid, and is said as that.
+  if (
+    closed === null &&
+    parts !== null &&
+    (round.payment === "OnTableBill" || round.payment === "Paid")
+  )
+    return parts.refunded !== undefined && parts.refunded > 0
+      ? parts.paid === 0
+        ? t("{refunded} of {count} parts refunded in full", {
+            refunded: String(parts.refunded),
+            count: String(parts.count),
+          })
+        : t("{paid} of {count} parts paid, {refunded} refunded in full", {
+            paid: String(parts.paid),
+            count: String(parts.count),
+            refunded: String(parts.refunded),
+          })
+      : parts.paid >= parts.count
+        ? t("Paid")
+        : t("{paid} of {count} parts paid", {
+            paid: String(parts.paid),
+            count: String(parts.count),
+          });
+  if (closed === null) return roundRefundText(round, false);
+  if (closed.kind === "Parts" && (round.payment === "OnTableBill" || round.payment === "Paid"))
+    return t("{paid} of {count} parts paid; the rest not charged to you", {
+      paid: String(closed.paid),
+      count: String(closed.count),
+    });
+  // Batch 59 (v15 b58 live, L58R B): all that was paid went back: no round was paid. Batch 60
+  // (v15 b59 live, L59W A, phone B's round 2): staff's equal parts pay the bill, no round, so no
+  // round says a refund was made for it: each is not charged. By dish (or one payment for the
+  // whole table) only a round whose own payment went back says so; one never paid is not charged.
+  if (closed.kind === "Refunded" && (round.payment === "OnTableBill" || round.payment === "Paid"))
+    return round.payment === "Paid" && closed.parts === null
+      ? roundRefundText(round, true)
+      : t("Not charged to you");
+  if (round.payment === "Paid") return roundRefundText(round, true);
+  if (round.payment !== "OnTableBill") return null;
+  // Batch 61 (v15 b60 live, CRT60 D round 2): by dish, a round nobody paid any of is not charged
+  // at all; only a round some guest paid part of has an "unpaid part".
+  return closed.kind === "Nothing" || (closed.kind === "ByDish" && round.partlyPaid !== true)
+    ? t("Not charged to you")
+    : t("Unpaid part not charged to you");
+}
+
+/**
+ * Batch 60 (v15 b58/b59 known limit): a Paid round whose own payment staff then gave back, said as
+ * that (never "Paid" beside "Paid after refunds"). The phone whose payment it was reads what it
+ * paid for the round after refunds; another phone reads only that some or all of it went back.
+ * Null: no refund of this round's payment (it says Paid).
+ */
+function roundRefundText(round: DiningRound, closed: boolean): string | null {
+  const refund = round.payment === "Paid" ? round.paymentRefund : undefined;
+  if (refund === undefined) return null;
+  if (refund.state === "Full")
+    return closed ? t("Refunded in full; not charged to you") : t("Refunded in full");
+  return refund.yourPaidAfterRefunds === undefined
+    ? t("Partly refunded")
+    : t("Partly refunded; you paid {amount} after refunds", {
+        amount: money(refund.yourPaidAfterRefunds),
+      });
+}
+
+function RoundCard({
+  round,
+  onOrderAgain,
+  againStatus,
+  menu = null,
+  collectOrderNumber = null,
+  note = null,
+  closedBill = null,
+  billParts = null,
+}: {
+  readonly round: DiningRound;
+  /** Batch 56: staff's equal parts on a bill still open, once one is paid; null otherwise. */
+  readonly billParts?: OpenBillParts | null;
+  /** Batch 55: staff closed the table's bill (what was paid); null while it is open or paid. */
+  readonly closedBill?: ClosedBillPaid | null;
+  /** A guest started this table, so nobody brings a finished dish over: it is called by number. */
+  readonly collectOrderNumber?: string | null;
+  /** WP-2423 item 8b: says what the charge is, on the card guests will ask about. */
+  readonly note?: ReactNode;
+  /** WP-2423 item 8 ⑥ part 4: the published menu, for a combo's chosen dishes and allergens. */
+  readonly menu?: MenuView | null;
+  /** Absent when the table can't add dishes now (checking out, paid or closed). */
+  readonly onOrderAgain?: ((item: DiningItem, key: string) => void) | undefined;
+  /** What happened to the dish last ordered again, shown under it (by "round:item" key). */
+  readonly againStatus?: { readonly key: string; readonly node: ReactNode } | undefined;
+}) {
+  const headingId = `dining-round-${round.roundNumber}`;
+  const charge = staffCharge(round);
+  const closedPayment = closedRoundPaymentText(round, closedBill, billParts);
+  // v15 batch-5: cancelled before anyone paid, so nothing is owed for it: no tax, no total.
+  // v15 b20: so is a round staff took off a table's bill before it paid (never charged): its
+  // dishes' own subtotal, tax and total must not read as owed.
+  const notCharged =
+    round.status === "NotPaidCancelled" ||
+    (round.status === "StoreCancelled" && round.payment === "NotCharged");
+  return (
+    <article className="order-status__card order-status__batch" aria-labelledby={headingId}>
+      <h3 id={headingId}>
+        {t("Round {round}", { round: String(round.roundNumber) })} ·{" "}
+        {!charge
+          ? orderedByText[round.orderedBy]
+          : round.tea === true
+            ? t("Per-person charge")
+            : t("Other charge")}
+        {/* b39 review: after a merge, the table this round was ordered at. */}
+        {round.fromTable === undefined
+          ? null
+          : ` · ${t("From table {table}", { table: saidTable(round.fromTable) })}`}
+      </h3>
+      <dl className="dining-session__round-facts">
+        <div>
+          <dt>{charge ? t("Added at") : t("Ordered at")}</dt>
+          <dd>{roundTime(round.submittedAt)}</dd>
+        </div>
+        {charge ? null : (
+          <div>
+            <dt>{t("Status")}</dt>
+            <dd>
+              {round.status === "Ready" && collectOrderNumber !== null
+                ? t("Ready · collect order {number} at the counter", { number: collectOrderNumber })
+                : round.status === "StoreCancelled" && round.payment === "NotCharged"
+                  ? // b28 (v15 live26): staff took it off a table's bill before it paid, as its
+                    // note says; "Cancelled by the store" read as the restaurant refusing it.
+                    t("Taken off the bill")
+                  : statusText[round.status]}
+            </dd>
+          </div>
+        )}
+        <div>
+          <dt>{t("Payment")}</dt>
+          <dd>
+            {/* b26 (live25): a round in the kitchen the bill charges nothing for (comped) has
+                nothing to pay; "Not charged" stays for rounds that never went to the kitchen. */}
+            {/* Batch 55: Chinese short words stay whole in the narrow column. */}
+            {closedPayment !== null
+              ? keepWords(closedPayment)
+              : round.payment === "NotCharged" && !settledOrWaiting.has(round.status)
+                ? t("Nothing to pay")
+                : paymentText[round.payment]}
+          </dd>
+        </div>
+      </dl>
+      {note}
+      <RoundNote round={round} />
+      <ul>
+        {round.items.map((item, index) => (
+          <li key={index} className={item.cancelled ? "order-status__item--cancelled" : undefined}>
+            <span className="order-status__item-name">
+              {item.quantity} × {item.displayName}
+              {item.orderAgain === undefined ? null : (
+                <ComboLine menu={menu} again={item.orderAgain} />
+              )}
+            </span>
+            <span className="order-status__item-amount">
+              {money(item.priceBeforeTax ?? item.lineTotal)}
+            </span>
+            {item.cancelled ? (
+              <span className="order-status__item-cancelled">
+                {/* b25: staff took the dish off the table's bill before it was charged, as Orders
+                    and checkout say. b25 final: only the read's takenOff says so; a dish of an
+                    unpaid pay-first round, one the kitchen refused that stays on the bill, and a
+                    paid round's refunded dish read Cancelled. */}
+                {item.takenOff === true
+                  ? // b39: a dish staff took off because it sold out says so.
+                    item.soldOut === true
+                    ? t("Sold out · taken off the bill, not charged")
+                    : t("Taken off the bill · not charged")
+                  : t("Cancelled")}
+              </span>
+            ) : item.beingRemade ? (
+              <span className="order-status__item-remake">
+                {collectOrderNumber !== null
+                  ? t("Being remade · collect order {number} at the counter when it's ready", {
+                      number: collectOrderNumber,
+                    })
+                  : t("Being remade · we'll bring it to your table shortly")}
+              </span>
+            ) : item.progress !== undefined && !charge ? (
+              // M91: every round says where each dish is, not only a paid one (batch 63: only
+              // where it differs from the round's own word). A null answer means "say nothing"
+              // and never reaches the older paid-round count below.
+              (() => {
+                const progressText = dishProgressText(item, round.status);
+                return progressText === null ? null : (
+                  <span className="order-status__item-progress">{progressText}</span>
+                );
+              })()
+            ) : round.payment === "Paid" && !charge ? (
+              <span>
+                {t("Served")} {item.servedQuantity} {t("of")} {item.quantity}
+              </span>
+            ) : null}
+            {onOrderAgain !== undefined && !item.cancelled && item.orderAgain !== undefined ? (
+              <button
+                className="dining-session__order-again"
+                type="button"
+                aria-label={t("Order one more {name}", { name: item.displayName })}
+                onClick={() => onOrderAgain(item, `${round.roundNumber}:${index}`)}
+              >
+                {t("Order again")}
+              </button>
+            ) : null}
+            {againStatus?.key === `${round.roundNumber}:${index}` ? againStatus.node : null}
+          </li>
+        ))}
+      </ul>
+      {/* WP-2423 D5: like the receipt — items before tax, then subtotal, tax and total. */}
+      {/* v15 batch-5: a round cancelled before anyone paid has no tax or total: none is owed. */}
+      {notCharged ? (
+        <p className="order-status__total">
+          <span>{t("Round total")}</span>
+          <span>{t("Not charged")}</span>
+        </p>
+      ) : round.bill !== undefined ? (
+        // b13 (DEC-TAX-WHOLE-RECEIPT): a round on the table's bill reads as the bill prints it —
+        // what the restaurant took off, then its subtotal, tax and total — so the round cards add
+        // up to the Table total and the paid bill (never its full price after a comp).
+        <BillLines bill={round.bill} totalLabel={t("Round total")} />
+      ) : round.subtotal !== undefined && round.tax !== undefined ? (
+        <dl className="order-status__money">
+          <div>
+            <dt>{t("Subtotal")}</dt>
+            <dd>{money(round.subtotal)}</dd>
+          </div>
+          {adjustments(round.itemsTotal, round.subtotal, round.tax) ? (
+            <div>
+              <dt>{t("Discounts and fees")}</dt>
+              <dd>{adjustments(round.itemsTotal, round.subtotal, round.tax)}</dd>
+            </div>
+          ) : null}
+          <div>
+            <dt>{t("Tax")}</dt>
+            <dd>{money(round.tax)}</dd>
+          </div>
+        </dl>
+      ) : null}
+      {notCharged || round.bill !== undefined ? null : (
+        <p className="order-status__total">
+          <span>
+            {round.subtotal === undefined ? t("Round total including tax") : t("Round total")}
+          </span>
+          <span>{money(round.itemsTotal)}</span>
+        </p>
+      )}
+      {/* v15 b20: what went back for this round's cancelled dishes, on the round it was paid on. */}
+      {round.refunded !== undefined || round.refundPending !== undefined ? (
+        <dl className="order-status__money">
+          {round.refunded !== undefined ? (
+            <div>
+              <dt>{t("Refunded")}</dt>
+              <dd>{money(round.refunded)}</dd>
+            </div>
+          ) : null}
+          {round.refundPending !== undefined ? (
+            <div>
+              <dt>{t("Refund on its way")}</dt>
+              <dd>{money(round.refundPending)}</dd>
+            </div>
+          ) : null}
+        </dl>
+      ) : null}
+    </article>
+  );
+}
+
+/** WP-2423 item 8 ⑦ 4b-3: the per-head charge, set by staff from the number of guests. */
+function PerPersonChargeNote({ view }: { readonly view: DiningSessionView }) {
+  const charge = view.summary?.teaCharge;
+  if (charge === undefined) return null;
+  return (
+    <p className="dining-session__tea" role="note">
+      {t("{name} {price} per person · {count} at this table (added by staff).", {
+        // The Store's own name for it (an older answer has none).
+        name: charge.name ?? t("Per-person charge"),
+        price: money(charge.perGuest),
+        count: String(charge.guests),
+      })}
+    </p>
+  );
+}
+
+/**
+ * The one card that says what the per-person charge is: the charge's own, newest first. Null when no
+ * card is only that charge (it was entered with dishes): the table total says it then.
+ */
+const perPersonChargeRound = (view: DiningSessionView) =>
+  view.summary?.teaCharge === undefined
+    ? null
+    : ([...view.rounds]
+        .reverse()
+        .find((round) => round.tea === true && staffCharge(round) && !chargeTakenOff(round)) ??
+      null);
+
+/**
+ * b13 (DEC-TAX-WHOLE-RECEIPT): a bill's lines as staff checkout and the paid bill print them: the
+ * dishes and what came off them before tax (only when something did), the subtotal, one tax
+ * worked out on the bill, and the total.
+ */
+function BillLines({
+  bill,
+  totalLabel,
+}: {
+  readonly bill: NonNullable<DiningSessionView["rounds"][number]["bill"]>;
+  readonly totalLabel: string;
+}) {
+  const reduced = bill.takenOff.amountMinor !== "0" || bill.pointsUsed.amountMinor !== "0";
+  return (
+    <>
+      <dl className="order-status__money">
+        {reduced ? (
+          <div>
+            <dt>{t("Dishes")}</dt>
+            <dd>{money(bill.items)}</dd>
+          </div>
+        ) : null}
+        {bill.takenOff.amountMinor !== "0" ? (
+          <div>
+            <dt>{t("Taken off by the restaurant")}</dt>
+            <dd>−{money(bill.takenOff)}</dd>
+          </div>
+        ) : null}
+        {bill.pointsUsed.amountMinor !== "0" ? (
+          <div>
+            <dt>{t("Points used")}</dt>
+            <dd>−{money(bill.pointsUsed)}</dd>
+          </div>
+        ) : null}
+        <div>
+          <dt>{t("Subtotal")}</dt>
+          <dd>{money(bill.subtotal)}</dd>
+        </div>
+        <div>
+          <dt>{t("Tax")}</dt>
+          <dd>{money(bill.tax)}</dd>
+        </div>
+      </dl>
+      <p className="order-status__total">
+        <span>{totalLabel}</span>
+        <span>{money(bill.total)}</span>
+      </p>
+    </>
+  );
+}
+
+/**
+ * Batch 54/55: the Table total's note on a bill staff closed when the guests left: what was paid,
+ * that staff closed it, and that the rest is not charged. Batch 59 (v15 b58 live, L58R B): a part
+ * staff gave back in full is not called paid, and a bill whose payments all went back says so.
+ */
+function closedBillNote(closed: ClosedBillPaid): string {
+  switch (closed.kind) {
+    case "Nothing":
+      return t("Staff closed your table’s bill; nothing was charged.");
+    case "ByDish":
+      return t(
+        "Staff closed your table’s bill: the table paid by dish ({paid} paid), and the rest is not charged to you.",
+        { paid: String(closed.payments) },
+      );
+    case "Parts":
+      return (closed.refunded ?? 0) > 0
+        ? t(
+            "Staff closed your table’s bill: the table paid {paid} of the {count} parts (payments for {refunded} more went back in full), and the rest is not charged to you.",
+            {
+              count: String(closed.count),
+              paid: String(closed.paid),
+              refunded: String(closed.refunded ?? 0),
+            },
+          )
+        : t(
+            "Staff closed your table’s bill: the table paid {paid} of the {count} parts, and the rest is not charged to you.",
+            { count: String(closed.count), paid: String(closed.paid) },
+          );
+    case "Refunded":
+      return closed.parts === null
+        ? t(
+            "Staff closed your table’s bill: what was paid went back in full; nothing is charged to you.",
+          )
+        : t(
+            "Staff closed your table’s bill: payments for {refunded} of the {count} parts went back in full; nothing is charged to you.",
+            { count: String(closed.parts.count), refunded: String(closed.parts.refunded) },
+          );
+    case "Some":
+      // Batch 61 (v15 b60 live, CRT60 D): part of it went back, so it does not "stay paid".
+      return closed.someRefunded === true
+        ? t(
+            "Staff closed your table’s bill and refunded part of what was paid; the rest is not charged to you.",
+          )
+        : t(
+            "Staff closed your table’s bill: what the table paid stays paid, and the rest is not charged to you.",
+          );
+  }
+}
+
+export function TableSummary({
+  view,
+  checkingOut = false,
+}: {
+  readonly view: DiningSessionView;
+  /** Batch 63 (D62B-14, F13): the table's checkout has started (what is owed is "still to pay"). */
+  readonly checkingOut?: boolean;
+}) {
+  const payLater = view.paymentTiming === "PayLater";
+  const summary = view.summary;
+  if (summary === null) return null;
+  const nonZero = (value: DiningMoney) => value.amountMinor !== "0";
+  // Batch 54 (v15 b53 live): staff closed the bill when the guests left; what was paid stays
+  // paid and the rest is not charged. Said as that, never as paid in full. Batch 55: read as Menu,
+  // dish pages and Cart read it.
+  const outcome = tableBillOutcome(view);
+  const closedByStaff = outcome.kind === "ClosedByStaff";
+  const closedBill = outcome.kind === "ClosedByStaff" ? outcome.paid : null;
+  // Batch 59: a part staff gave back in full is not paid (open bill; closed: closedBillNote).
+  const refundedParts = summary.splitParts?.refunded ?? 0;
+  // A table paying at the end that has paid everything it owes (staff closing a bill say so).
+  const allPaid = payLater && !closedByStaff && !nonZero(summary.due) && nonZero(summary.paid);
+  // Batch 53: the split's parts once the bill is paid in full (the server keeps them). Paid in
+  // full only when the table paid all it owes (never a bill staff closed by writing off the rest)
+  // and, for staff's split, every part was paid (never the rest taken off after 1 of 3 parts).
+  const splitPaid =
+    allPaid &&
+    summary.splitParts !== undefined &&
+    summary.splitParts.paid > 0 &&
+    (summary.splitParts.count === null || summary.splitParts.paid >= summary.splitParts.count)
+      ? summary.splitParts
+      : null;
+  // Batch 53 review: parts were paid and nothing is left to pay, but not by paying in full.
+  const splitEnded =
+    splitPaid === null &&
+    summary.splitParts !== undefined &&
+    summary.splitParts.paid > 0 &&
+    !nonZero(summary.due)
+      ? summary.splitParts
+      : null;
+  return (
+    <section
+      className="order-status__card order-status__summary dining-session__summary"
+      aria-labelledby="dining-summary-heading"
+    >
+      <h2 id="dining-summary-heading">{t("Table total")}</h2>
+      {summary.bill !== undefined ? (
+        <>
+          <BillLines bill={summary.bill} totalLabel={t("Total")} />
+          {summary.tableTip !== undefined && nonZero(summary.tableTip) ? (
+            <dl className="order-status__money">
+              <div>
+                <dt>{t("Tip")}</dt>
+                <dd>{money(summary.tableTip)}</dd>
+              </div>
+            </dl>
+          ) : null}
+          {summary.cashRounding !== undefined && nonZero(summary.cashRounding) ? (
+            <dl className="order-status__money">
+              <div>
+                <dt>{t("Cash rounding")}</dt>
+                <dd>{signedMoney(summary.cashRounding)}</dd>
+              </div>
+            </dl>
+          ) : null}
+        </>
+      ) : summary.ordered !== undefined ? (
+        <dl className="order-status__money">
+          <div>
+            <dt>{t("Subtotal")}</dt>
+            <dd>{money(summary.ordered.subtotal)}</dd>
+          </div>
+          {adjustments(summary.ordered.total, summary.ordered.subtotal, summary.ordered.tax) ? (
+            <div>
+              <dt>{t("Discounts and fees")}</dt>
+              <dd>
+                {adjustments(summary.ordered.total, summary.ordered.subtotal, summary.ordered.tax)}
+              </dd>
+            </div>
+          ) : null}
+          <div>
+            <dt>{t("Tax")}</dt>
+            <dd>{money(summary.ordered.tax)}</dd>
+          </div>
+          <div>
+            <dt>{t("Total ordered")}</dt>
+            <dd>{money(summary.ordered.total)}</dd>
+          </div>
+          {/* WP-2423 取舍 18: the sale stands at its price; this is why less was paid. */}
+          {summary.pointsUsed !== undefined ? (
+            <div>
+              <dt>{t("Points used")}</dt>
+              <dd>−{money(summary.pointsUsed)}</dd>
+            </div>
+          ) : null}
+          {/* v15 2026-11-02: every line between what was ordered and what is to pay. */}
+          {summary.takenOff !== undefined ? (
+            <div>
+              <dt>{t("Taken off by the restaurant")}</dt>
+              <dd>−{money(summary.takenOff)}</dd>
+            </div>
+          ) : null}
+          {summary.taxRounding !== undefined ? (
+            <div>
+              <dt>{t("Rounding (tax worked out on the whole bill)")}</dt>
+              <dd>{money(summary.taxRounding)}</dd>
+            </div>
+          ) : null}
+          {/* DEC-DINE-IN-PAY-LATER: the table's one payment, line by line up to what was paid. */}
+          {summary.tableTip !== undefined && nonZero(summary.tableTip) ? (
+            <div>
+              <dt>{t("Tip")}</dt>
+              <dd>{money(summary.tableTip)}</dd>
+            </div>
+          ) : null}
+          {summary.cashRounding !== undefined && nonZero(summary.cashRounding) ? (
+            <div>
+              <dt>{t("Cash rounding")}</dt>
+              <dd>{signedMoney(summary.cashRounding)}</dd>
+            </div>
+          ) : null}
+        </dl>
+      ) : null}
+      <dl>
+        {/* Batch 58 (v15 b57 live): once staff gave any of it back, what the table paid after
+            refunds, said as that; never who was refunded or how much each one got back. */}
+        {summary.paidAfterRefunds === undefined ? (
+          <div>
+            <dt>{allPaid || closedByStaff ? t("Paid") : t("Paid so far")}</dt>
+            <dd>{money(summary.paid)}</dd>
+          </div>
+        ) : (
+          <div>
+            <dt>{t("Paid after refunds")}</dt>
+            <dd>{money(summary.paidAfterRefunds)}</dd>
+          </div>
+        )}
+        {/* Batch 52 (v15 b51 live): one name per moment for what the table still owes. Before
+            anyone pays it is what the table pays at the end; once a part is paid, what is still to
+            pay; once it is all paid there is nothing left to name (the pay section thanks them). */}
+        {allPaid ? null : (
+          // Batch 63 (CDI-4, F07): the table's key number, as strong as a round's total.
+          <div className="dining-session__due">
+            <dt>
+              {closedByStaff
+                ? nonZero(summary.paidAfterRefunds ?? summary.paid)
+                  ? t("Rest of the bill")
+                  : t("The bill")
+                : summary.splitParts !== undefined ||
+                    (payLater && (nonZero(summary.paid) || checkingOut))
+                  ? t("Still to pay")
+                  : payLater
+                    ? t("To pay at the end")
+                    : t("Waiting for payment")}
+            </dt>
+            <dd>
+              {closedByStaff
+                ? t("Not charged to you")
+                : nonZero(summary.due)
+                  ? money(summary.due)
+                  : t("Nothing")}
+            </dd>
+          </div>
+        )}
+        {nonZero(summary.refunded) ? (
+          <div>
+            <dt>{t("Refunded")}</dt>
+            <dd>{money(summary.refunded)}</dd>
+          </div>
+        ) : null}
+        {nonZero(summary.refundPending) ? (
+          <div>
+            <dt>{t("Refund on its way")}</dt>
+            <dd>{money(summary.refundPending)}</dd>
+          </div>
+        ) : null}
+      </dl>
+      {perPersonChargeRound(view) === null ? <PerPersonChargeNote view={view} /> : null}
+      <p>
+        {summary.ordered === undefined
+          ? ""
+          : payLater
+            ? t("Item prices are before tax. ")
+            : t("Item prices are before tax. Dishes refunded or never charged are not included. ")}
+        {/* Batch 53 (v15 b52 live): a bill paid in parts says so once it is paid, never "paid
+            once at the end"; while parts are left, rounding is said only for cash at the counter
+            (the rest paid on a phone or by card is never rounded). Batch 54 (v15 b53 live): a bill
+            staff closed says what was paid, that staff closed it, and that the rest is not
+            charged; never that the table paid in full. */}
+        {closedByStaff && closedBill !== null
+          ? closedBillNote(closedBill)
+          : payLater && splitPaid !== null
+            ? splitPaid.count === null && splitPaid.paid === 1
+              ? t("The table paid in one payment.")
+              : splitPaid.count === null
+                ? t("The table paid by dish, in {paid} payments.", {
+                    paid: String(splitPaid.paid),
+                  })
+                : t("The table paid the bill in {count} parts.", {
+                    count: String(splitPaid.count),
+                  })
+            : payLater && splitEnded !== null
+              ? splitEnded.count === null
+                ? t("The table paid by dish, {paid} paid; nothing is left to pay.", {
+                    paid: String(splitEnded.paid),
+                  })
+                : t("The table paid {paid} of the {count} parts; nothing is left to pay.", {
+                    count: String(splitEnded.count),
+                    paid: String(splitEnded.paid - refundedParts),
+                  })
+              : payLater && summary.splitParts !== undefined && summary.splitParts.count === null
+                ? t(
+                    "The table is paying by dish; {paid} paid so far. Cash at the counter is rounded to the nearest 5\u00a0cents; card and phone payments are not.",
+                    { paid: String(summary.splitParts.paid) },
+                  )
+                : payLater && summary.splitParts !== undefined
+                  ? t(
+                      "The table is paying the bill in parts: {paid} of {count} parts paid. Cash at the counter is rounded to the nearest 5\u00a0cents; card and phone payments are not.",
+                      {
+                        count: String(summary.splitParts.count),
+                        paid: String(summary.splitParts.paid - refundedParts),
+                      },
+                    )
+                  : payLater
+                    ? summary.cashRounding !== undefined
+                      ? t("The table paid once at the end.")
+                      : summary.bill !== undefined &&
+                          summary.bill.total.amountMinor === "0" &&
+                          summary.bill.items.amountMinor !== "0"
+                        ? // b13: a bill comped to nothing owes nothing, said as that.
+                          t("The restaurant took everything off: there is nothing to pay.")
+                        : t(
+                            "Rounds go to the kitchen when they are sent. The table pays once at the end, with tax.",
+                          )
+                    : t(
+                        "Paid amounts include tax and any tip. Amounts waiting for payment include tax, before any tip. Each guest pays for the rounds they order.",
+                      )}
+        {/* Batch 65 (v15 b64 live F13): once the table has paid, cash rounding is said only when
+            some of it was paid in cash and rounded (the bill then shows a Cash rounding line);
+            a table that paid on phones or by card was never rounded, so it is not told about
+            cash. While some is left to pay, the note above still says it for the counter. */}
+        {!closedByStaff &&
+        (splitPaid !== null || splitEnded !== null || summary.splitParts === undefined) &&
+        payLater &&
+        summary.cashRounding !== undefined &&
+        nonZero(summary.cashRounding)
+          ? wordGap() +
+            t(
+              "Cash is rounded to the nearest 5\u00a0cents; card and phone payments are not rounded.",
+            )
+          : null}
+        {/* Batch 59 (v15 b58 live): parts staff gave back in full, said once, never whose. */}
+        {!closedByStaff && refundedParts > 0
+          ? " " +
+            t("Payments for {refunded} of the parts went back in full.", {
+              refunded: String(refundedParts),
+            })
+          : null}
+      </p>
+    </section>
+  );
+}
+
+export type DiningSessionState =
+  | { readonly status: "loading" }
+  | { readonly status: "not-joined" }
+  /** WP-2423 item 8 ⑧: staff moved the party to this table after this phone joined. */
+  | {
+      readonly status: "moved";
+      readonly tableLabel: string;
+      readonly merged: boolean;
+      /** Batch 46: the party had ordered nothing at its own table. */
+      readonly nothingOrdered: boolean;
+    }
+  /** The table was closed and its bill settled while this phone's guest sat at it. */
+  | { readonly status: "settled"; readonly tableLabel: string }
+  /** Batch 45: staff closed the table with nothing ordered (nothing charged, no receipt). */
+  | { readonly status: "ended-empty"; readonly tableLabel: string }
+  /** Batch 55 review: staff closed the bill when the guests left, then the table (no receipt). */
+  | {
+      readonly status: "ended-closed";
+      readonly tableLabel: string;
+      readonly paid: "Nothing" | "Some" | "Refunded";
+    }
+  | {
+      readonly status: "unavailable";
+      readonly view: DiningSessionView | null;
+      readonly offline: boolean;
+    }
+  | { readonly status: "ready"; readonly view: DiningSessionView; readonly refreshing: boolean };
+
+/** Rounds still moving (or a table with no rounds yet) keep the page re-reading. */
+export function isDiningSessionActive(view: DiningSessionView | null): boolean {
+  return (
+    view !== null &&
+    (view.rounds.length === 0 || view.rounds.some((round) => !settled.has(round.status)))
+  );
+}
+
+/**
+ * Owner 2026-11-03 walkthrough: a table whose dishes are all served is still eating and paying, so
+ * it keeps being read until it is settled; otherwise a guest who paid still sees the amount due.
+ */
+export function keepsReadingTable(state: DiningSessionState): boolean {
+  return (state.status === "ready" || state.status === "unavailable") && state.view !== null;
+}
+
+export function DiningSessionPage({
+  store,
+  visitEnded = () => globalThis.location.reload(),
+  client: provided,
+  invitationClient,
+  staffCallClient,
+  cartClient,
+  menuContext,
+  menuClient,
+}: {
+  readonly store?: CustomerStoreContext | undefined;
+  /** The table ended while this page was open: open the visit again (tests supply one). */
+  readonly visitEnded?: () => void;
+  readonly client?: DiningSessionClient | undefined;
+  /** WP-2423 item 8 ⑥ part 4: the published menu, for a combo's chosen dishes and allergens. */
+  readonly menuContext?: MenuJourneyContext | undefined;
+  readonly menuClient?: CustomerMenuClient | undefined;
+  /** WP-2423 item 8 ③ (decision 13): the guest's own cart for "Order again" (tests inject). */
+  readonly cartClient?: CustomerCartClient | undefined;
+  /** WP-2423 DEC-DINING-GUEST-INVITATION (tests inject; the page uses HTTP by default). */
+  readonly invitationClient?: DiningInvitationClient | undefined;
+  /** WP-2423 Q28 DEC-DINING-STAFF-CALL (tests inject; the page uses HTTP by default). */
+  readonly staffCallClient?: DiningStaffCallClient | undefined;
+}) {
+  const [client] = useState(() => provided ?? createHttpDiningSessionClient());
+  const [state, setState] = useState<DiningSessionState>({ status: "loading" });
+  // WP-2423 item 6: the cart placed a round in one tap and sent the guest here. It says so once: the
+  // address keeps no record of it, so coming back to this page later doesn't claim it again.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [placed, setPlaced] = useState<RoundPlaced | null>(() => placedRound(location.state));
+  // Batch 62: followed from "See your receipt": this page brings the receipt into view, once.
+  const [showReceipt] = useState(() => wantsYourReceipt(location.state));
+  useEffect(() => {
+    if (placedRound(location.state) !== null || wantsYourReceipt(location.state))
+      void navigate(location.pathname, { replace: true, state: null });
+  }, [location.pathname, location.state, navigate]);
+  // The menu is read once the table has ordered something (a combo's dishes and allergens).
+  const menu = usePublishedMenu(
+    menuContext,
+    menuClient,
+    "view" in state && state.view !== null && state.view.rounds.length > 0,
+  );
+  const pending = useRef<AbortController | null>(null);
+  // v15 2026-11-02: asked to read while a read is under way (points were just used): that read
+  // may already be out of date, so read once more as soon as it ends.
+  const readAgain = useRef(false);
+  const [readAgainTick, setReadAgainTick] = useState(0);
+  // v15 2026-10-27: right after the first round the order is prepared within seconds; the page
+  // waits and reads again (a bounded number of times) instead of saying "join your table".
+  const processingRetries = useRef(0);
+  // v15 b17 review: the wait the server asked for before that next read (Retry-After).
+  const processingWaitMs = useRef(2000);
+  const lastView = useRef(false);
+  const [retryTick, setRetryTick] = useState(0);
+  const load = useCallback(async () => {
+    if (pending.current) {
+      readAgain.current = true;
+      return;
+    }
+    const controller = new AbortController();
+    pending.current = controller;
+    setState((prior) =>
+      prior.status === "ready"
+        ? { ...prior, refreshing: true }
+        : prior.status === "unavailable"
+          ? prior
+          : { status: "loading" },
+    );
+    try {
+      const view = await client.load(controller.signal);
+      processingRetries.current = 0;
+      lastView.current = true;
+      if (!controller.signal.aborted) setState({ status: "ready", view, refreshing: false });
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      if (
+        error instanceof DiningSessionClientError &&
+        error.code === "processing" &&
+        processingRetries.current < 15
+      ) {
+        processingRetries.current += 1;
+        processingWaitMs.current = error.retryAfterSeconds * 1000;
+        setRetryTick((value) => value + 1);
+        return;
+      }
+      if (error instanceof DiningSessionClientError && error.code === "not-joined") {
+        // Owner 2026-11-03: staff closed the table while this page was open. Opening the visit
+        // again says how it ended (the receipt and thanks), which only that reading knows.
+        if (lastView.current) {
+          lastView.current = false;
+          visitEnded();
+          return;
+        }
+        setState({ status: "not-joined" });
+      } else if (
+        error instanceof DiningSessionClientError &&
+        error.code === "moved" &&
+        error.tableLabel !== null
+      )
+        setState({
+          status: "moved",
+          tableLabel: error.tableLabel,
+          merged: error.merged,
+          nothingOrdered: error.nothingOrdered,
+        });
+      else if (
+        error instanceof DiningSessionClientError &&
+        error.code === "settled" &&
+        error.tableLabel !== null
+      )
+        setState({ status: "settled", tableLabel: error.tableLabel });
+      else if (
+        error instanceof DiningSessionClientError &&
+        error.code === "ended-empty" &&
+        error.tableLabel !== null
+      )
+        setState({ status: "ended-empty", tableLabel: error.tableLabel });
+      else if (
+        error instanceof DiningSessionClientError &&
+        error.code === "ended-closed" &&
+        error.tableLabel !== null
+      )
+        setState({ status: "ended-closed", tableLabel: error.tableLabel, paid: error.closedPaid });
+      // Keep the last loaded table on screen; say it may be out of date.
+      else
+        setState((prior) => ({
+          status: "unavailable",
+          view: prior.status === "ready" || prior.status === "unavailable" ? prior.view : null,
+          offline: typeof navigator !== "undefined" && navigator.onLine === false,
+        }));
+    } finally {
+      if (pending.current === controller) pending.current = null;
+      if (readAgain.current) {
+        readAgain.current = false;
+        setReadAgainTick((value) => value + 1);
+      }
+    }
+  }, [client]);
+  useEffect(() => {
+    if (readAgainTick > 0) void load();
+  }, [readAgainTick, load]);
+  // Owner 2026-11-03: back online, read at once, so "You're offline" doesn't linger on the page.
+  useEffect(() => {
+    const backOnline = () => void load();
+    window.addEventListener("online", backOnline);
+    return () => window.removeEventListener("online", backOnline);
+  }, [load]);
+  useEffect(() => {
+    if (retryTick === 0) return;
+    const timer = window.setTimeout(() => void load(), processingWaitMs.current);
+    return () => window.clearTimeout(timer);
+  }, [retryTick, load]);
+  // Owner 2026-10-23: item names come from the Store in the chosen language.
+  useReloadOnLanguageChange(() => void load());
+  // A replaced session credential (the visit refreshed after a round was sent) reads the table
+  // again, so a read made with the previous one never leaves "Join your table first" on screen.
+  useEffect(() => subscribeCustomerCsrfContext(() => void load()), [load]);
+  useEffect(() => {
+    void load();
+    return () => {
+      pending.current?.abort();
+      pending.current = null;
+    };
+  }, [load]);
+  // The line about the round just placed lasts until that round moves on. Batch 63 (v15 batch
+  // 62 review CDI-10, F12): and only until the table is read again a while later (the next
+  // check, about 15 s on) or the guest taps Refresh now — it stayed at the top long after the
+  // round was sent, even after another guest's round came in.
+  const placedRoundSeen = useRef<string | null>(null);
+  const placedShownAt = useRef<number | null>(null);
+  useEffect(() => {
+    if (placed === null || state.status === "loading" || state.status === "unavailable") return;
+    if (state.status !== "ready") {
+      setPlaced(null);
+      return;
+    }
+    const seen = placedRoundFact(state.view);
+    if (seen === null) return;
+    if (placedShownAt.current !== null && Date.now() - placedShownAt.current >= placedLineMs) {
+      setPlaced(null);
+      return;
+    }
+    placedShownAt.current ??= Date.now();
+    placedRoundSeen.current ??= seen;
+    if (
+      placedRoundSeen.current !== seen ||
+      (placed === "Held" && !seen.includes("|WaitingForStaff|"))
+    )
+      setPlaced(null);
+  }, [placed, state]);
+  const showingTable = keepsReadingTable(state);
+  // Owner 2026-11-03 walkthrough: staff start checkout at any moment; the pay panel reads with it.
+  const [billReadKey, setBillReadKey] = useState(0);
+  useEffect(() => {
+    if (!showingTable) return;
+    const tick = () => {
+      if (typeof document === "undefined" || document.visibilityState === "visible") {
+        void load();
+        setBillReadKey((value) => value + 1);
+      }
+    };
+    const timer = window.setInterval(tick, diningSessionPollIntervalMs);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, [showingTable, load]);
+  // v15 batch 7: staff split the bill (or a guest paid a part) — the table's summary says so, and
+  // the pay section reads the bill at once, never offering the whole table until the next tick.
+  const splitFact =
+    state.status === "ready" && state.view.summary?.splitParts !== undefined
+      ? JSON.stringify(state.view.summary.splitParts)
+      : state.status === "ready"
+        ? "none"
+        : null;
+  const seenSplitFact = useRef<string | null>(null);
+  useEffect(() => {
+    if (splitFact === null) return;
+    if (seenSplitFact.current !== null && seenSplitFact.current !== splitFact)
+      setBillReadKey((value) => value + 1);
+    seenSplitFact.current = splitFact;
+  }, [splitFact]);
+  return (
+    <DiningSessionScreen
+      state={state}
+      store={store}
+      cartClient={cartClient}
+      menu={menu}
+      placed={placed}
+      showReceipt={showReceipt}
+      // Batch 63 (F12): the guest's own fresh look no longer needs the line about the round.
+      onRefreshTapped={() => setPlaced(null)}
+      onRefresh={() => {
+        // v15 batch 7: "Refresh now" reads the pay section too.
+        void load();
+        setBillReadKey((value) => value + 1);
+      }}
+      billReadKey={billReadKey}
+      invitation={
+        // Stays mounted while a table is shown (also during a failed refresh), so a code on
+        // screen is not lost; it is never stored.
+        state.status === "ready" || (state.status === "unavailable" && state.view !== null) ? (
+          <DiningInvitationPanel client={invitationClient} />
+        ) : null
+      }
+      staffCall={
+        // WP-2423 Q28: shown with the table, including while a refresh fails (staff may still be
+        // reachable); the panel itself says when they are not.
+        state.status === "ready" || (state.status === "unavailable" && state.view !== null) ? (
+          <DiningStaffCallPanel client={staffCallClient} />
+        ) : null
+      }
+    />
+  );
+}
+
+/**
+ * Coordinator 2026-10-30 (Owner authorized): the guest's table was closed after its bill was
+ * settled. Thank them and show the table's receipt (whatever paid it); a new party scans the
+ * table's code again.
+ */
+function SettledTable({
+  tableLabel,
+  receipt,
+  own,
+}: {
+  readonly tableLabel: string;
+  readonly receipt?: SettledTableReceiptClient | undefined;
+  readonly own?: OwnPaymentReceiptClient | undefined;
+}) {
+  return (
+    <>
+      <SettledTableCard tableLabel={tableLabel} />
+      <SettledTableReceiptPanel
+        {...(receipt === undefined ? {} : { client: receipt })}
+        // Batch 64 (v15 b62 live): the phone that paid the whole bill keeps its own lines.
+        ownLines={<SettledOwnPaymentLines client={own} />}
+      />
+    </>
+  );
+}
+
+/** What the cart says it just did (router state; no private data). */
+export type RoundPlaced = "Sent" | "Held";
+const placedRound = (state: unknown): RoundPlaced | null => {
+  const placed = (state as { placed?: unknown } | null)?.placed;
+  return placed === "Sent" || placed === "Held" ? placed : null;
+};
+/**
+ * Batch 63 (F12): what the guest's round just placed is, by its number: "Round 2 sent to the
+ * kitchen" (or "placed" while staff confirm it, or before it reaches the kitchen).
+ */
+const placedText = (placed: RoundPlaced, view: DiningSessionView | null): string => {
+  const own =
+    view === null ? undefined : [...view.rounds].reverse().find((r) => r.orderedBy === "You");
+  if (own === undefined)
+    return placed === "Held" ? t("Order placed. Staff confirm it first.") : t("Order placed.");
+  const round = String(own.roundNumber);
+  if (placed === "Held") return t("Round {round} placed. Staff confirm it first.", { round });
+  // Only once the round's own status says the kitchen has it ("Received by the store" may hold
+  // dishes the kitchen never makes).
+  return ["Queued", "Preparing", "Ready", "Serving"].includes(own.status)
+    ? t("Round {round} sent to the kitchen", { round })
+    : t("Round {round} placed.", { round });
+};
+/** Where this guest's newest round stands, as one comparable fact; null before they have one. */
+const placedRoundFact = (view: DiningSessionView): string | null => {
+  const own = [...view.rounds].reverse().find((round) => round.orderedBy === "You");
+  return own === undefined ? null : `${own.roundNumber}|${own.status}|${own.payment}`;
+};
+
+export function DiningSessionScreen({
+  state,
+  store,
+  onRefresh,
+  onRefreshTapped,
+  invitation = null,
+  staffCall = null,
+  cartClient,
+  menu = null,
+  settledReceipt,
+  billReadKey,
+  tablePaymentClient,
+  ownPaymentReceipt,
+  placed = null,
+  showReceipt = false,
+}: {
+  /** Batch 62: followed from "See your receipt": bring this phone's receipt into view. */
+  readonly showReceipt?: boolean;
+  /** Batch 56: this phone's own payment's receipt reader (tests supply one). */
+  readonly ownPaymentReceipt?: OwnPaymentReceiptClient | undefined;
+  /** WP-2423 item 6: a round was just placed from the cart (never "sent to the kitchen": a held
+   * round waits for staff, and an item not prepared never reaches it). */
+  readonly placed?: RoundPlaced | null;
+  /** A new value reads the table's payment state again. */
+  readonly billReadKey?: number | undefined;
+  /** Asked before "Order again" adds a dish (tests inject). */
+  readonly tablePaymentClient?:
+    Pick<ReturnType<typeof createTablePaymentClient>, "read"> | undefined;
+  readonly cartClient?: CustomerCartClient | undefined;
+  /** The settled table's receipt reader (tests supply one). */
+  readonly settledReceipt?: SettledTableReceiptClient | undefined;
+  /** WP-2423 item 8 ⑥ part 4: the published menu (a combo's chosen dishes and allergens). */
+  readonly menu?: MenuView | null;
+  readonly state: DiningSessionState;
+  readonly store?: CustomerStoreContext | undefined;
+  readonly onRefresh: () => void;
+  /** Batch 63 (F12): the guest tapped Refresh now (the page's own reads don't count). */
+  readonly onRefreshTapped?: (() => void) | undefined;
+  /** WP-2423 DEC-DINING-GUEST-INVITATION: the host's "Invite someone at your table". */
+  readonly invitation?: ReactNode;
+  /** WP-2423 Q28 DEC-DINING-STAFF-CALL: "Need a staff member?". */
+  readonly staffCall?: ReactNode;
+}) {
+  // DEC-DINE-IN-PAY-LATER: whether the table is checking out or paid, from its pay panel.
+  const [tablePay, setTablePay] = useState<TablePayStatus | null>(null);
+  // Batch 62 review: this phone also paid a part or its dishes: its receipt stays its own.
+  const [ownApart, setOwnApart] = useState(false);
+  useBringYourReceiptIntoView(showReceipt);
+  const view = state.status === "ready" || state.status === "unavailable" ? state.view : null;
+  const active = isDiningSessionActive(view);
+  // Batch 42 (v15 b41 live): a table staff haven't opened yet (or one being cleaned) says so here
+  // too, and goes on by itself once staff open it, as the start page does.
+  const unseated =
+    state.status === "not-joined" &&
+    getGuestTableStarter() === null &&
+    !isGuestTableQuestion() &&
+    isUnseatedTableScan()
+      ? getUnseatedTableWait()
+      : null;
+  useGoOnWhenTableOpens(unseated?.kind === "NotOpen");
+  const [orderAgain] = useState(() =>
+    createConfigureController({ client: cartClient ?? createBrowserCustomerCartClient() }),
+  );
+  const [again, setAgain] = useState<{ key: string; item: DiningItem } | null>(null);
+  const [tablePayment] = useState(() => tablePaymentClient ?? createTablePaymentClient());
+  // Batch 56 (v15 b55 live): this phone's own payment on a bill staff closed — with the table
+  // visit's value while the table is open, the ended visit's read-only value once it closed.
+  const [ownAtTable] = useState(
+    () => ownPaymentReceipt ?? createOwnPaymentReceiptClient(getCustomerCsrfCredential),
+  );
+  const [ownAfterClose] = useState(
+    () => ownPaymentReceipt ?? createOwnPaymentReceiptClient(getClosedTableOwnReceiptCsrf),
+  );
+  const endedTable = state.status === "ended-closed" ? getEndedTable() : null;
+  const endedYourPaidMinor =
+    endedTable?.kind === "ClosedByStaff" ? (endedTable.yourPaidMinor ?? null) : null;
+  // Dishes can be added while the table orders: not while it checks out, after it paid, or once
+  // everything is closed. A table paying at the end can still order after everything is served.
+  // Batch 54: a bill staff closed (the guests left) takes nothing more either, paid or not.
+  // Batch 55: how the bill ended, read as Menu, dish pages and Cart read it.
+  const outcome = view === null ? null : tableBillOutcome(view);
+  const closedBill = outcome?.kind === "ClosedByStaff" ? outcome.paid : null;
+  const paidThenRefunded = outcome?.kind === "Paid" && outcome.refunded === true;
+  const billParts = view === null ? null : openBillParts(view);
+  const paidOff =
+    tablePay?.paid === true ||
+    closedBill !== null ||
+    (view?.paymentTiming === "PayLater" &&
+      view.summary !== null &&
+      view.summary.due.amountMinor === "0" &&
+      view.summary.paid.amountMinor !== "0");
+  const canOrderAgain =
+    state.status === "ready" &&
+    (active || view?.paymentTiming === "PayLater") &&
+    !paidOff &&
+    tablePay?.checkingOut !== true;
+  // Batch 44 (v15 b43 live): after a reload the ended meal's page still names its Store (the
+  // restore says which), never "scan the location QR code to begin". Batch 45: so does a table
+  // closed with nothing ordered, and a party moved or merged to another table.
+  const settledStore =
+    state.status === "settled" ||
+    state.status === "ended-empty" ||
+    state.status === "ended-closed" ||
+    state.status === "moved"
+      ? getEndedTableStore()
+      : null;
+  const pageStore: CustomerStoreContext | undefined =
+    store ??
+    (settledStore === null
+      ? undefined
+      : {
+          storeName: settledStore.storeDisplayName,
+          brandName: settledStore.brandDisplayName,
+          serviceMode: "DineIn",
+        });
+  return (
+    <CustomerPage step="table" store={pageStore} className="order-status dining-session">
+      {/* Batch 63 (F12): no "ORDER 84" over the table: the number means nothing to a guest at a
+          table (the receipt keeps it). */}
+      <PageHeading
+        title={
+          view?.tableLabel
+            ? t("Your table · {tableLabel}", { tableLabel: view.tableLabel })
+            : t("Your table")
+        }
+      >
+        {/* Batch 46 (v15 b45 live): said only above a table's list, never over an ended or
+            moved table's card with nothing under it. */}
+        {state.status === "settled" ||
+        state.status === "ended-empty" ||
+        state.status === "ended-closed" ||
+        state.status === "moved" ? null : (
+          <p>{t("Everything ordered at this table, by you and the other guests.")}</p>
+        )}
+      </PageHeading>
+      {view?.movedFromTableLabel === undefined || !view.tableLabel ? null : (
+        // WP-2423 table-move-payment: staff moved the party after this phone joined; it follows.
+        <p className="dining-session__moved" role="status">
+          {tWords(
+            "Staff moved your party from table {from} to table {table}. Keep ordering and paying on this phone.",
+            { from: saidTable(view.movedFromTableLabel), table: saidTable(view.tableLabel) },
+          )}
+        </p>
+      )}
+      {placed === null ? null : (
+        <p className="dining-session__placed" role="status">
+          {placedText(placed, view)}
+        </p>
+      )}
+      {state.status === "loading" ? (
+        <section role="status">
+          <h2>{t("Loading your table")}</h2>
+        </section>
+      ) : null}
+      {state.status === "moved" ? (
+        <MovedTableCard
+          tableLabel={state.tableLabel}
+          merged={state.merged}
+          nothingOrdered={state.nothingOrdered}
+        />
+      ) : null}
+      {state.status === "settled" ? (
+        <SettledTable
+          tableLabel={state.tableLabel}
+          receipt={settledReceipt}
+          own={ownPaymentReceipt}
+        />
+      ) : null}
+      {state.status === "ended-empty" ? (
+        <EmptyClosedTableCard tableLabel={state.tableLabel} />
+      ) : null}
+      {state.status === "ended-closed" ? (
+        <>
+          {/* What this phone paid is said once, by its receipt below. */}
+          <ClosedBillTableCard
+            tableLabel={state.tableLabel}
+            paid={state.paid}
+            someRefunded={endedTable?.kind === "ClosedByStaff" && endedTable.someRefunded === true}
+          />
+          {endedYourPaidMinor === null || state.paid === "Nothing" ? null : (
+            <OwnPaymentReceiptPanel client={ownAfterClose} />
+          )}
+        </>
+      ) : null}
+      {state.status === "not-joined" ? (
+        <section className="order-status__card" role="alert">
+          {/* WP-2423 DEC-DINING-GUEST-TABLE-START: nobody seats these guests, so nobody is asked. */}
+          {getGuestTableStarter() !== null ? (
+            <>
+              <h2>{t("Start this table first")}</h2>
+              <p>{t("Add a dish from the menu to start, or go back to start this table.")}</p>
+            </>
+          ) : isGuestTableQuestion() ? (
+            <>
+              <h2>{t("Join your table first")}</h2>
+              <p>{t("First tell us if you’re with the people at this table.")}</p>
+            </>
+          ) : unseated?.kind === "NotOpen" ? (
+            // Batch 42: staff open this table; nobody hands out a code. The start page's words.
+            <>
+              <h2>
+                {keepWords(tableNotOpenHeading(unseated.storeDisplayName, unseated.tableLabel))}
+              </h2>
+              <p role="status">{tableNotOpenWaitText()}</p>
+            </>
+          ) : unseated?.kind === "BeingCleaned" ? (
+            <h2>{t("This table is being cleaned. Pick another table or ask staff.")}</h2>
+          ) : !isUnseatedTableScan() && store !== undefined ? (
+            // WP-2423 M115: the table's page offers the join this table allows (its QR code, or a
+            // code when QR joins are paused), so the guest is sent there, not asked for a code.
+            <>
+              <h2>{t("Join your table first")}</h2>
+              <p>{t("Join this table to order and see what your table has ordered.")}</p>
+            </>
+          ) : (
+            // No table on this phone at all (opened here without a scan): how a guest joins one.
+            <>
+              <h2>{t("Join your table first")}</h2>
+              <p>
+                {t(
+                  "Ask a staff member, or the person who joined your table first, for your table's join code and enter it after scanning the table's QR code. Then you can see what your table has ordered.",
+                )}
+              </p>
+            </>
+          )}
+          <Link className="order-status__back" to="/">
+            {unseated?.kind === "NotOpen"
+              ? backToWaitingText()
+              : getGuestTableStarter() === null &&
+                  !isGuestTableQuestion() &&
+                  !isUnseatedTableScan() &&
+                  store !== undefined
+                ? t("Join this table")
+                : t("Go to the start")}
+          </Link>
+        </section>
+      ) : null}
+      {state.status === "unavailable" ? (
+        <section className="order-status__unavailable" role="alert">
+          <span className="order-status__unavailable-icon" aria-hidden="true">
+            !
+          </span>
+          <h2>{state.offline ? t("You’re offline") : t("We couldn’t load your table")}</h2>
+          <p>
+            {view
+              ? t("Showing what was loaded before. It may be out of date.")
+              : t(
+                  "Check your connection and try again. A staff member can also tell you what your table has ordered.",
+                )}
+          </p>
+          <button className="order-status__retry" type="button" onClick={onRefresh}>
+            {t("Try again")}
+          </button>
+        </section>
+      ) : null}
+      {/* Owner 2026-11-03 walkthrough: first what needs doing, then what the guest ordered. */}
+      {/* DEC-DINE-IN-PAY-LATER S4: the guest pays the whole table here once checkout started. */}
+      {view?.paymentTiming === "PayLater" ? (
+        <TablePayPanel
+          // Batch 62 (v15 b61 live, G61 E): a bill one phone paid whole and staff then gave some
+          // of back: the payer's own payment and refund are said inside the table's receipt, the
+          // one receipt of that payment (another phone's read finds nothing of its own there).
+          ownReceipt={
+            paidThenRefunded ? (
+              <OwnPaymentReceiptPanel client={ownAtTable} inTableReceipt onApart={setOwnApart} />
+            ) : null
+          }
+          // Batch 63 (design review D62B-01, F02): once this phone paid a part or some dishes,
+          // Pay the bill first says what it paid, with that payment's lines.
+          ownPaid={<OwnPaymentReceiptPanel client={ownAtTable} soFar />}
+          readKey={billReadKey}
+          onStatus={(status) => {
+            setTablePay(status);
+            // The table's total and rounds are read again (paid in full, or checkout started).
+            onRefresh();
+          }}
+          onBillChanged={onRefresh}
+          onGone={onRefresh}
+        />
+      ) : null}
+      {/* Batch 56: staff closed a bill some of which was paid: the phone that paid it reads its
+          own receipt here (another guest's phone is answered "nothing here" and shows nothing). */}
+      {(closedBill !== null && closedBill.kind !== "Nothing") ||
+      // Batch 62 review: hidden only once the table's Receipt is known to show it (a failed pay
+      // section read keeps the payer's receipt, as batch 61 did).
+      (paidThenRefunded && (tablePay?.receipt !== true || ownApart)) ? (
+        // Batch 61 (v15 b60 live, CRT60 B/C): a bill paid in full that staff then gave some of
+        // back: the payer reads its own payment and refund here too (others: nothing here).
+        <OwnPaymentReceiptPanel client={ownAtTable} />
+      ) : null}
+      {staffCall}
+      {view && view.rounds.length === 0 ? (
+        <section className="order-status__card">
+          <h2>{t("No one at this table has ordered yet")}</h2>
+          <p>{t("Rounds appear here as soon as someone at your table places an order.")}</p>
+        </section>
+      ) : null}
+      {view && view.rounds.length > 0 ? (
+        <section className="order-status__batches" aria-labelledby="dining-rounds-heading">
+          <h2 id="dining-rounds-heading">{t("Rounds")}</h2>
+          {/* v15 2026-10-29: charges staff took off (the tea followed the guests) are kept on the
+              record but shown to guests as one line. */}
+          {((count) =>
+            count === 0 ? null : (
+              <p className="dining-session__tea-adjusted">
+                {count === 1
+                  ? t("Staff took off 1 charge. It isn’t charged.")
+                  : t("Staff took off {count} charges. They aren’t charged.", {
+                      count: String(count),
+                    })}
+              </p>
+            ))(view.rounds.filter(chargeTakenOff).length)}
+          {/* WP-2423 item 6: newest first, numbers unchanged: the round just placed is the first
+              card a guest sees, and a charge from when the table opened sinks to the bottom. */}
+          {[...view.rounds]
+            .reverse()
+            .filter((round) => !chargeTakenOff(round))
+            .map((round) => (
+              <RoundCard
+                key={round.roundNumber}
+                round={round}
+                closedBill={closedBill}
+                billParts={billParts}
+                menu={menu}
+                collectOrderNumber={view.startedByGuest === true ? view.orderNumber : null}
+                note={
+                  perPersonChargeRound(view)?.roundNumber === round.roundNumber ? (
+                    <PerPersonChargeNote view={view} />
+                  ) : null
+                }
+                againStatus={
+                  again === null
+                    ? undefined
+                    : {
+                        key: again.key,
+                        node: <OrderAgainStatus controller={orderAgain} item={again.item} />,
+                      }
+                }
+                onOrderAgain={
+                  canOrderAgain
+                    ? (item, key) => {
+                        const wanted = item.orderAgain;
+                        if (wanted === undefined) return;
+                        void (async () => {
+                          // Owner 2026-11-03 walkthrough: staff may have just started checkout;
+                          // adding a dish then would look as if the guest lost their table.
+                          const payment =
+                            view?.paymentTiming === "PayLater"
+                              ? await tablePayment.read().catch(() => null)
+                              : null;
+                          if (payment?.checkingOut === true) {
+                            setTablePay({ checkingOut: true, paid: payment.state === "Paid" });
+                            return;
+                          }
+                          setAgain({ key, item });
+                          void orderAgain.submit(wanted.sellableReference, {
+                            quantity: 1,
+                            customerNote: null,
+                            optionSelections: wanted.optionSelections,
+                          });
+                        })();
+                      }
+                    : undefined
+                }
+              />
+            ))}
+        </section>
+      ) : null}
+      {/* DEC-DINE-IN-PAY-LATER: during checkout no more rounds are sent; paid, nothing to add. */}
+      {/* A settled table's visit has ended: nothing more to order here. */}
+      {/* b39: a table moved or merged away orders on its new table's code, never from here. */}
+      {state.status === "settled" ||
+      state.status === "ended-empty" ||
+      state.status === "ended-closed" ||
+      state.status === "moved" ||
+      state.status === "not-joined" ||
+      paidOff ? null : tablePay?.checkingOut ? (
+        // Batch 63 (D62B-07, F12): a status, a grey dot and dark words; it was set in the link
+        // style (accent, 44 px lines) and read as two links that did nothing.
+        <p className="dining-session__paying-note" role="note">
+          {t("Your table is paying the bill. Ask staff if you want to add more.")}
+        </p>
+      ) : (
+        <Link className="order-status__back" to="/menu">
+          {t("Order more from the menu")}
+        </Link>
+      )}
+      {view ? <TableSummary view={view} checkingOut={tablePay?.checkingOut === true} /> : null}
+      {invitation}
+      {state.status === "ready" ? (
+        <section className="order-status__actions" aria-label={t("Updates")}>
+          <p>
+            {active
+              ? t("This page checks for updates every few seconds.")
+              : t("Everything at this table is served or closed.")}
+          </p>
+          <button
+            type="button"
+            disabled={state.refreshing}
+            onClick={() => {
+              onRefreshTapped?.();
+              onRefresh();
+            }}
+          >
+            {state.refreshing ? t("Refreshing…") : t("Refresh now")}
+          </button>
+        </section>
+      ) : null}
+      {view ? (
+        <aside className="menu-help" aria-labelledby="dining-help-heading">
+          <h2 id="dining-help-heading">{t("Allergies or a problem with your food?")}</h2>
+          <p>{t("Tell a staff member before you eat. They can check any dish for you.")}</p>
+        </aside>
+      ) : null}
+    </CustomerPage>
+  );
+}

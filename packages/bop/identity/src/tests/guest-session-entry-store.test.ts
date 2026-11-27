@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createGuestSessionRecord,
   createPostgresGuestSessionEntryStore,
+  createPostgresFencedGuestSessionEntryStore,
   createPostgresGuestSessionLegacyInspector,
   type GuestSessionEntryTransactionRunner,
 } from "../index.js";
@@ -393,4 +394,57 @@ describe("WP-2211 lifecycle persistence", () => {
       }),
     ).rejects.toMatchObject({ code: "GUEST_SESSION_UNAVAILABLE" });
   });
+});
+
+it("explicit fenced resolve borrows transaction and locks the scoped Guest without mutation", async () => {
+  const h = harness(),
+    record = fixture();
+  const store = createPostgresFencedGuestSessionEntryStore(h.runner, scope);
+  expect(await store.resolve(record.sessionSelectorHash)).toEqual(record);
+  expect(h.query.mock.calls[1]?.[0]).toContain("FOR UPDATE");
+  expect(h.query.mock.calls[1]?.[1]).toEqual([
+    scope.brandReference,
+    scope.storeReference,
+    record.sessionSelectorHash,
+  ]);
+  expect(h.query.mock.calls.every(([sql]) => sql.startsWith("SELECT"))).toBe(true);
+});
+it("ordinary Guest resolve remains an unlocked observation", async () => {
+  const h = harness();
+  await h.store.resolve(fixture().sessionSelectorHash);
+  expect(h.query.mock.calls[1]?.[0]).not.toContain("FOR UPDATE");
+});
+
+// WP-2423 (reads-under-burst, v15 2026-11-13): every guest cart read starts with this Session read,
+// so in a rush it is the one that waits for a database connection. The plain answer it gives keeps
+// that failure behind it, so the API can tell "no connection in time" (busy) from a real fault.
+it("a Session read that could not get a database connection keeps that failure behind its plain answer", async () => {
+  const noConnection = Object.assign(new Error("database"), {
+    code: "TENANT_DATABASE_ACQUIRE_FAILED",
+  });
+  const store = createPostgresGuestSessionEntryStore(
+    {
+      run: async () => {
+        throw noConnection;
+      },
+    },
+    scope,
+  );
+  const refused = await store
+    .resolve(fixture().sessionSelectorHash)
+    .catch((error: unknown) => error);
+  expect(refused).toMatchObject({ code: "GUEST_SESSION_UNAVAILABLE" });
+  // A safe code only, under the key the API's failure log reads; never the error itself.
+  const kept = Object.getOwnPropertyDescriptor(refused, Symbol.for("bop.failure.cause"));
+  expect(kept?.enumerable).toBe(false);
+  expect(kept?.value).toEqual({ code: "TENANT_DATABASE_ACQUIRE_FAILED" });
+  expect(refused).not.toHaveProperty("cause");
+  expect(Object.keys(refused as object)).toEqual(["code", "name"]);
+  // The store's own refusal (a row that is not this Session's) stays the plain answer.
+  const own = harness({ rows: [{ record: fixture() }] });
+  const mismatch = await own.store
+    .resolve("9".repeat(64) as ReturnType<typeof fixture>["sessionSelectorHash"])
+    .catch((error: unknown) => error);
+  expect(mismatch).toMatchObject({ code: "GUEST_SESSION_UNAVAILABLE" });
+  expect(Object.getOwnPropertySymbols(mismatch)).toEqual([]);
 });

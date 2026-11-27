@@ -9,6 +9,8 @@ import type {
 import { parseProductOptionBinding } from "../domain/product.js";
 import {
   parseOptionSetAggregate,
+  productOptionBindingRule,
+  rebuiltProductOptionBinding,
   validateProductOptionBinding,
   type OptionSetAggregate,
 } from "../domain/option-set.js";
@@ -270,6 +272,31 @@ describe("Option Set / Option / Product Binding minimum model", () => {
       storeOverrideAllowed: false,
     });
     expect(() => validateProductOptionBinding(binding, created.aggregate)).not.toThrow();
+    for (const lifecycle of ["Draft", "Active", "Inactive", "Archived"] as const) {
+      const changed = parseOptionSetAggregate({
+        ...created.aggregate,
+        draft: {
+          ...created.aggregate.draft,
+          options: created.aggregate.draft.options.map((option) =>
+            option.optionReference === ids.milk ? { ...option, lifecycle } : option,
+          ),
+        },
+      });
+      const validate = () => validateProductOptionBinding(binding, changed);
+      if (lifecycle === "Inactive" || lifecycle === "Archived")
+        expect(validate).toThrowError(expect.objectContaining({ code: "CATALOG_INPUT_INVALID" }));
+      else expect(validate).not.toThrow();
+    }
+    const nonDefaultInactive = parseOptionSetAggregate({
+      ...created.aggregate,
+      draft: {
+        ...created.aggregate.draft,
+        options: created.aggregate.draft.options.map((option) =>
+          option.optionReference === ids.oat ? { ...option, lifecycle: "Inactive" } : option,
+        ),
+      },
+    });
+    expect(() => validateProductOptionBinding(binding, nonDefaultInactive)).not.toThrow();
     expect(() =>
       validateProductOptionBinding({ ...binding, maximumSelectionOverride: 2 }, created.aggregate),
     ).toThrowError(expect.objectContaining({ code: "CATALOG_INPUT_INVALID" }));
@@ -282,6 +309,89 @@ describe("Option Set / Option / Product Binding minimum model", () => {
         created.aggregate,
       ),
     ).toThrowError(expect.objectContaining({ code: "CATALOG_INPUT_INVALID" }));
+  });
+
+  it("WP-2423: a dish save's rebuilt binding starts guests with an offered default, or names the rule", async () => {
+    const state = fixture();
+    const created = await state.service.create(createInput());
+    // "Serve": one of Hot (milk) or Iced (oat); only Hot may be the default.
+    const serve = (hot: "Active" | "Inactive", icedDefault: boolean) =>
+      parseOptionSetAggregate({
+        ...created.aggregate,
+        draft: {
+          ...created.aggregate.draft,
+          options: created.aggregate.draft.options.map((option) =>
+            option.optionReference === ids.milk
+              ? { ...option, lifecycle: hot }
+              : { ...option, lifecycle: "Active", defaultEligible: icedDefault },
+          ),
+        },
+      });
+    const binding = parseProductOptionBinding({
+      bindingReference: ids.binding,
+      optionSetReference: ids.set,
+      optionSetVersionReference: id(77),
+      purpose: "CUSTOMER_CHOICE",
+      sortOrder: 0,
+      enabledOptionReferences: [ids.oat, ids.milk],
+      defaultSelections: [{ optionReference: ids.milk, quantity: 1 }],
+      minimumSelectionOverride: null,
+      maximumSelectionOverride: null,
+      includedSkuReferences: [],
+      excludedSkuReferences: [],
+      channelCodes: [],
+      storeOverrideAllowed: false,
+    });
+    const offered = rebuiltProductOptionBinding(binding, serve("Active", false));
+    expect(offered.optionSetVersionReference).toBe(ids.version);
+    expect(offered.defaultSelections).toEqual([{ optionReference: ids.milk, quantity: 1 }]);
+    expect(productOptionBindingRule(offered, serve("Active", false))).toBeNull();
+    // WP-2423 (cart-unsellable-dishes): Hot off for now and Iced not a default: the dish keeps
+    // Hot (it is back tomorrow). A dish save keeps it; List it still asks for Hot to be offered.
+    const hotOff = serve("Inactive", false);
+    const rebuilt = rebuiltProductOptionBinding(binding, hotOff);
+    expect(rebuilt.defaultSelections).toEqual([{ optionReference: ids.milk, quantity: 1 }]);
+    expect(productOptionBindingRule(rebuilt, hotOff)).toBe("DefaultUnavailable");
+    expect(productOptionBindingRule(rebuilt, hotOff, "Draft")).toBeNull();
+    expect(productOptionBindingRule(rebuilt, hotOff, "Sale")).toBeNull();
+    // Archived is gone for good: no mode keeps it as a default.
+    const hotArchived = parseOptionSetAggregate({
+      ...hotOff,
+      draft: {
+        ...hotOff.draft,
+        options: hotOff.draft.options.map((option) =>
+          option.optionReference === ids.milk ? { ...option, lifecycle: "Archived" } : option,
+        ),
+      },
+    });
+    expect(
+      productOptionBindingRule(
+        {
+          ...rebuilt,
+          enabledOptionReferences: rebuilt.enabledOptionReferences.filter((r) => r === ids.oat),
+        },
+        hotArchived,
+        "Draft",
+      ),
+    ).toBe("DefaultUnavailable");
+    expect(rebuiltProductOptionBinding(binding, hotArchived).defaultSelections).toEqual([]);
+    // Selling checks no default rule, only the limits.
+    expect(
+      productOptionBindingRule({ ...rebuilt, defaultSelections: [] }, hotOff, "Sale"),
+    ).toBeNull();
+    expect(
+      productOptionBindingRule({ ...rebuilt, enabledOptionReferences: [] }, hotOff, "Sale"),
+    ).toBe("EnabledBelowMinimum");
+    // Ordered by the set alone, a choice turned off moves no default.
+    expect(
+      rebuiltProductOptionBinding(binding, serve("Inactive", true), { offeredFirst: false })
+        .defaultSelections,
+    ).toEqual([{ optionReference: ids.milk, quantity: 1 }]);
+    // Iced may be the default: the rebuilt binding starts with Iced and fits.
+    const icedDefault = serve("Inactive", true);
+    const fixed = rebuiltProductOptionBinding(binding, icedDefault);
+    expect(fixed.defaultSelections).toEqual([{ optionReference: ids.oat, quantity: 1 }]);
+    expect(productOptionBindingRule(fixed, icedDefault)).toBeNull();
   });
 
   it("rejects self-trigger, dangling conflicts, duplicate codes and markup", () => {
