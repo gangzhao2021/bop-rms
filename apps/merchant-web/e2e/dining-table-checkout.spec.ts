@@ -1467,10 +1467,12 @@ test("@production guests paying by dish: staff see each guest's dishes and take 
         ],
       },
     });
-  await page.route("**/merchant/dining/table-bill", (route) =>
-    route.fulfill({ headers, json: byDish(false) }),
-  );
   const sent: Record<string, unknown>[] = [];
+  // The bill read answers what the server holds: paid once the rest is recorded, so the 5 s bill
+  // poll landing just after the payment (slow CI, fb685f722) cannot bring the unpaid bill back.
+  await page.route("**/merchant/dining/table-bill", (route) =>
+    route.fulfill({ headers, json: byDish(sent.length > 0) }),
+  );
   await page.route("**/merchant/dining/table-settle", (route) => {
     sent.push(route.request().postDataJSON() as Record<string, unknown>);
     return route.fulfill({ headers, json: { status: "Recorded", bill: byDish(true) } });
