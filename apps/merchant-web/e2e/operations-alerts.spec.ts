@@ -944,7 +944,11 @@ test("@production past the end staff are told it has stopped, in Chinese too", a
   await page.goto("/operations/dining");
   await expect(orderingNotice(page)).toContainText("Ordering at this Store has stopped");
   await expect(orderingNotice(page)).not.toContainText("If it stops");
-  await page.getByRole("button", { name: "切换到中文" }).click();
+  // Tables moves its language switch from the top bar into the page header once the floor has
+  // loaded; click the one that is on screen when the layout has settled (CI flake at 9061a47b7).
+  const toChinese = page.getByRole("button", { name: "切换到中文" }).filter({ visible: true });
+  await expect(toChinese).toHaveCount(1);
+  await toChinese.click();
   const chinese = page.getByRole("region", { name: "这家店的点单服务" });
   await expect(chinese).toContainText("这家店的点单服务已经停止");
   await expect(chinese).toContainText("继续用店里自己的收银机或纸单点单，用刷卡机收款");
