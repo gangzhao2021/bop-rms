@@ -2204,6 +2204,11 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+/* Batch 67 (v15 b65 live, TM2 at 390): "Start count" sat on the "No counts yet" heading with no
+   gap. The form ends with the page's gap between sections, as the heading above it does. */
+.stock-counts__start {
+  margin-bottom: var(--bop-space-6);
+}
 .inventory-count-list-shell .bop-shell__main {
   max-width: 1500px;
   padding: 24px 48px 48px;

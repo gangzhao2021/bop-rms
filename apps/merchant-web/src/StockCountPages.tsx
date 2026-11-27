@@ -297,7 +297,7 @@ export function StockCountListPage({
       <StockShortageNotice view={view} />
       {view.permissions.mayCreate ? (
         <form
-          className="detail-section"
+          className="detail-section stock-counts__start"
           onSubmit={(event) => {
             event.preventDefault();
             void create();
