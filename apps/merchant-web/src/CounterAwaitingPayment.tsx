@@ -1,4 +1,10 @@
-import { t } from "./i18n/i18n.js";
+import {
+  forgetKeptThroughLanguageSwitch,
+  keepThroughLanguageSwitch,
+  t,
+  takeKeptThroughLanguageSwitch,
+} from "./i18n/i18n.js";
+import { keptRecordedPaymentOf } from "./staff-order-kept-confirmation.js";
 import { Link } from "react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -75,7 +81,13 @@ export function CounterAwaitingPayment({
   paidOrderReferences,
   onExcludedCancellable,
   onCharging,
+  keptKey,
 }: {
+  /**
+   * Batch 67 (v15 b66 live): where the "Order N paid" panel is kept through a language switch, so
+   * the switch does not take it off the screen (shown again, never recorded again).
+   */
+  readonly keptKey?: string | undefined;
   /**
    * Batch 64 (v15 b63 live, F42): whether staff have a waiting order's payment open here, so the
    * page puts the menu and the empty order away, as it does while charging an order just sent.
@@ -114,7 +126,16 @@ export function CounterAwaitingPayment({
     readonly orderReference: string;
     readonly orderNumber: string;
     readonly payment: RecordedCardPayment;
-  } | null>(null);
+  } | null>(() =>
+    keptKey === undefined ? null : keptRecordedPaymentOf(takeKeptThroughLanguageSwitch(keptKey)),
+  );
+  const recordedNow = useRef(recorded);
+  recordedNow.current = recorded;
+  useEffect(() => {
+    if (keptKey === undefined) return;
+    forgetKeptThroughLanguageSwitch(keptKey);
+    return keepThroughLanguageSwitch(keptKey, () => recordedNow.current);
+  }, [keptKey]);
   const paidHeading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     if (recorded !== null) paidHeading.current?.focus();

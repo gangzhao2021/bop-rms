@@ -45,8 +45,6 @@ import {
   paidAtInstant,
   paidAtRefusal,
   payErrorText,
-  paidNoteText,
-  paperAlreadyRecordedText,
   paperPaymentProblem,
   payIntentKey,
   paymentUrgentMinutes,
@@ -77,6 +75,13 @@ import {
   type TableCartItem,
 } from "./staff-order-entry.js";
 import { PaperSlipConfirm } from "./PaperSlipConfirm.js";
+import {
+  keptConfirmationOf,
+  paidNoteFrom,
+  type KeptConfirmation,
+  type PaidNoteSource,
+  type RemovedSource,
+} from "./staff-order-kept-confirmation.js";
 import { useStoreBusinessDay } from "./StoreBusinessDay.js";
 import {
   clearStaffRoundDraft,
@@ -932,6 +937,52 @@ interface KeptDraft {
   readonly businessDate?: string | null;
   readonly roundBack?: StaffRoundBack | null;
 }
+/** One of the order's lines as the language switch kept it. */
+function isKeptLine(line: unknown): line is Line {
+  const entry = line as Partial<Line> | null;
+  return (
+    entry !== null &&
+    typeof entry === "object" &&
+    typeof entry.key === "string" &&
+    typeof entry.item?.sellableReference === "string" &&
+    typeof entry.item.name === "string" &&
+    Array.isArray(entry.item.rules) &&
+    Number.isSafeInteger(entry.quantity) &&
+    (entry.quantity ?? 0) >= 1 &&
+    Array.isArray(entry.options)
+  );
+}
+/** Batch 67: what staff tell the guests about their dishes taken out, said in today's language. */
+function removedNoteFrom(source: RemovedSource | null): string | null {
+  if (source === null) return null;
+  if (source.kind === "TableCart")
+    return tableCartRemovedNote(
+      source.names.map((name) => ({
+        cartItemReference: "",
+        name,
+        quantity: 1,
+        standing: "Unavailable" as const,
+        available: null,
+      })),
+    );
+  return guestRemovedNote(
+    source.lines.map((line) => ({
+      cartItemReference: "",
+      name: line.name,
+      options: "",
+      quantity: 1,
+      estimateMinor: null,
+      unsellable: line.unsellable,
+      phoneNumber: null,
+      phoneLeft: false,
+    })),
+  );
+}
+/** Batch 67: a sent round's or paid order's confirmation as the language switch keeps it. */
+export function keptSentOf(value: unknown): KeptConfirmation<Line> | null {
+  return keptConfirmationOf(value, isKeptLine);
+}
+
 export function keptDraftOf(value: unknown): KeptDraft | null {
   if (value === null || typeof value !== "object") return null;
   const raw = value as Record<string, unknown>;
@@ -948,20 +999,7 @@ export function keptDraftOf(value: unknown): KeptDraft | null {
         party !== undefined &&
         (party.session === null || typeof party.session === "string"))
     ) ||
-    !raw.lines.every((line: unknown) => {
-      const entry = line as Partial<Line> | null;
-      return (
-        entry !== null &&
-        typeof entry === "object" &&
-        typeof entry.key === "string" &&
-        typeof entry.item?.sellableReference === "string" &&
-        typeof entry.item.name === "string" &&
-        Array.isArray(entry.item.rules) &&
-        Number.isSafeInteger(entry.quantity) &&
-        (entry.quantity ?? 0) >= 1 &&
-        Array.isArray(entry.options)
-      );
-    }) ||
+    !raw.lines.every(isKeptLine) ||
     !(
       raw.businessDate === undefined ||
       raw.businessDate === null ||
@@ -1047,6 +1085,14 @@ export function StaffOrderEntryPage({
   const draftKey = "staffOrder:" + storeReference + ":" + (tableReference ?? "counter");
   const [switchDraft] = useState(() => keptDraftOf(takeKeptThroughLanguageSwitch(draftKey)));
   /**
+   * Batch 67 (v15 b66 live): the confirmation of a round just sent or an order just paid, kept
+   * through the language switch's reload (shown again, never sent or recorded again).
+   */
+  const sentKey = "staffOrderSent:" + storeReference + ":" + (tableReference ?? "counter");
+  const [keptSent] = useState(() =>
+    switchDraft === null ? keptSentOf(takeKeptThroughLanguageSwitch(sentKey)) : null,
+  );
+  /**
    * Batch 65 (v15 b64 live): a table's round not sent yet, kept on this device, comes back after a
    * reload or signing in again, with a note; it is checked against the table's party and the
    * business day once they are read, and never sent by itself.
@@ -1057,7 +1103,7 @@ export function StaffOrderEntryPage({
   const [savedRound] = useState(() =>
     startingStaffRound(
       switchDraft,
-      switchDraft === null && tableMode && tableReference !== null
+      switchDraft === null && keptSent === null && tableMode && tableReference !== null
         ? loadStaffRoundDraft<Line>(storeReference, tableReference)
         : null,
     ),
@@ -1072,7 +1118,9 @@ export function StaffOrderEntryPage({
   /** The kept round still to be checked against the table's party (when the table is read). */
   const savedRoundCheck = useRef(tableMode ? savedRound : null);
   const businessDay = useStoreBusinessDay();
-  const [lines, setLines] = useState<readonly Line[]>(() => restoredDraft?.lines ?? []);
+  const [lines, setLines] = useState<readonly Line[]>(
+    () => restoredDraft?.lines ?? keptSent?.lines ?? [],
+  );
   /** WP-2423 M165: ticket lines whose price changed on the last menu read (until the next edit). */
   const [repriced, setRepriced] = useState<readonly RepricedLine[]>([]);
   const linesNow = useRef(lines);
@@ -1092,13 +1140,17 @@ export function StaffOrderEntryPage({
   const [oftenOrdered] = useState(() => loadOftenOrdered(storeReference));
   const [activeSection, setActiveSection] = useState<string | null>(null);
   // "0": no tip; a percentage the Store offers, as text; or an amount typed in.
-  const [tip, setTip] = useState<string>(() => restoredDraft?.tip ?? "0");
-  const [customTip, setCustomTip] = useState(() => restoredDraft?.customTip ?? "");
-  const [paper, setPaper] = useState(false);
+  const [tip, setTip] = useState<string>(() => restoredDraft?.tip ?? keptSent?.tip ?? "0");
+  const [customTip, setCustomTip] = useState(
+    () => restoredDraft?.customTip ?? keptSent?.customTip ?? "",
+  );
+  const [paper, setPaper] = useState(() => keptSent?.paper ?? false);
   const [paidAt, setPaidAt] = useState("");
   const [slip, setSlip] = useState("");
   // WP-2423 M52 (DEC-COUNTER-CASH): how the counter guest pays, and the cash they handed over.
-  const [tender, setTender] = useState<"CardMachine" | "Cash">("CardMachine");
+  const [tender, setTender] = useState<"CardMachine" | "Cash">(
+    () => keptSent?.tender ?? "CardMachine",
+  );
   const [received, setReceived] = useState("");
   const [largeChangeConfirmed, setLargeChangeConfirmed] = useState(false);
   // WP-2423 M52: a cash Record that got no answer keeps the cash received as sent until it is
@@ -1107,13 +1159,13 @@ export function StaffOrderEntryPage({
   // WP-2423 (rush-logging-and-entry): the last payment record got no answer: its button says
   // "Record again" as the note above it does, and records the same payment operation again.
   const [recordAgain, setRecordAgain] = useState(false);
-  const [changeDue, setChangeDue] = useState<string | null>(null);
-  const [placed, setPlaced] = useState<PlacedCounterOrder | null>(null);
+  const [changeDue, setChangeDue] = useState<string | null>(() => keptSent?.changeDue ?? null);
+  const [placed, setPlaced] = useState<PlacedCounterOrder | null>(() => keptSent?.placed ?? null);
   // Batch 64 (v15 b63 live, F42): a "Sent, not paid yet" order is being charged above.
   const [resumedCharging, setResumedCharging] = useState(false);
   const [phase, setPhase] = useState<
     "Building" | "Sending" | "Charge" | "Recording" | "Paid" | "Accepted" | "Sent"
-  >("Building");
+  >(() => keptSent?.phase ?? "Building");
   const phaseNow = useRef(phase);
   phaseNow.current = phase;
   const [problem, setProblem] = useState<string | null>(null);
@@ -1124,10 +1176,21 @@ export function StaffOrderEntryPage({
     readonly items: readonly TableCartItem[];
   } | null>(null);
   // WP-2423 (staff-round-soldout): the guests' items taken off with the round sent, to tell them.
-  const [removedNote, setRemovedNote] = useState<string | null>(null);
+  // Batch 67: kept as what it says, so a language switch says it again in the new language.
+  const [removedSource, setRemovedSource] = useState<RemovedSource | null>(
+    () => keptSent?.removed ?? null,
+  );
+  const removedNote = removedNoteFrom(removedSource);
   // WP-2423 batch 28: the guests' dishes a sent round took in, shown with it (its total and the
   // card-machine amount include them), so staff never charge an amount they can't see.
-  const [sentGuest, setSentGuest] = useState<readonly GuestCartLine[]>([]);
+  const [sentGuest, setSentGuest] = useState<readonly GuestCartLine[]>(
+    () =>
+      keptSent?.sentGuest.map((line, index) => ({
+        ...line,
+        cartItemReference: "kept-" + String(index),
+        estimateMinor: line.estimateMinor === null ? null : BigInt(line.estimateMinor),
+      })) ?? [],
+  );
   // WP-2423 M35: the table's dining session (from the Tables list), the guests' unsent lines read
   // from it before staff send, and what staff decided for each (Send unless it can't be sent).
   const [tableSession, setTableSession] = useState<string | null>(null);
@@ -1149,7 +1212,9 @@ export function StaffOrderEntryPage({
   );
   const tableCartClient = useMemo(() => createTableCartClient(fetcher), [fetcher]);
   const guestRead = useRef<AbortController | null>(null);
-  const [paidNote, setPaidNote] = useState<string | null>(null);
+  // Batch 67: where the paid line came from, said in the language on screen.
+  const [paidSource, setPaidSource] = useState<PaidNoteSource | null>(() => keptSent?.paid ?? null);
+  const paidNote = paidSource === null ? null : paidNoteFrom(paidSource, tableMode);
   // WP-2423 (v15 751dd768): re-read the sent, unpaid counter orders after a send or a payment.
   const [awaitingKey, setAwaitingKey] = useState(0);
   // b11 review: a paper slip refused as already recorded with another order (named), and what staff
@@ -1444,6 +1509,38 @@ export function StaffOrderEntryPage({
       ),
     [draftKey],
   );
+  // Batch 67 (v15 b66 live): a round just sent or an order just paid keeps its confirmation
+  // through the language switch (only what it shows; nothing is sent or recorded again).
+  const sentNow = useRef<KeptConfirmation<Line> | null>(null);
+  sentNow.current =
+    placed !== null &&
+    (phase === "Sent" || phase === "Paid" || phase === "Accepted") &&
+    (phase === "Sent") === placed.payLater
+      ? {
+          phase,
+          placed: { ...placed, paperPayment: null },
+          lines,
+          tip,
+          customTip,
+          tender,
+          paper,
+          changeDue,
+          paid: paidSource,
+          removed: removedSource,
+          sentGuest: sentGuest.map((line) => ({
+            name: line.name,
+            options: line.options,
+            quantity: line.quantity,
+            estimateMinor: line.estimateMinor === null ? null : line.estimateMinor.toString(),
+            unsellable: line.unsellable,
+            phoneNumber: line.phoneNumber,
+            phoneLeft: line.phoneLeft,
+          })),
+        }
+      : null;
+  useEffect(() => keepThroughLanguageSwitch(sentKey, () => sentNow.current), [sentKey]);
+  // Read once: a later reload (not a switch) starts a new order as before.
+  useEffect(() => forgetKeptThroughLanguageSwitch(sentKey), [sentKey]);
   // After the charge heading takes focus on returning to Charge: a refused paid-at takes it instead.
   useEffect(() => {
     if (focusPaidAt === 0) return;
@@ -1818,7 +1915,7 @@ export function StaffOrderEntryPage({
     setProblemNeedsTableCode(false);
     setPartyChanged(false);
     setTableCartOffer(null);
-    setRemovedNote(null);
+    setRemovedSource(null);
     setSentGuest([]);
     setSlipHeld(null);
     try {
@@ -1872,10 +1969,16 @@ export function StaffOrderEntryPage({
       setPlaced(order);
       setPlacedCancellable(null);
       if (decided !== null) {
-        setRemovedNote(guestRemovedNote(removedAtSend));
+        setRemovedSource({
+          kind: "Guest",
+          lines: removedAtSend.map((line) => ({ name: line.name, unsellable: line.unsellable })),
+        });
         setSentGuest(guestAtSend);
       } else if (includeTableCart !== null && includeTableCart.removeUnavailable.length > 0)
-        setRemovedNote(tableCartRemovedNote(includeTableCart.removeUnavailable));
+        setRemovedSource({
+          kind: "TableCart",
+          names: includeTableCart.removeUnavailable.map((item) => item.name),
+        });
       setGuestDecisions({});
       recordOrdered(
         storeReference,
@@ -1888,33 +1991,28 @@ export function StaffOrderEntryPage({
         const recorded = paperOutcome.payment;
         setPhase(recorded.acceptance === "Accepted" ? "Accepted" : "Paid");
         setChangeDue(recorded.cash?.changeMinor ?? null);
-        setPaidNote(
-          paidNoteText({
-            tableMode,
-            recordedAfterOutage: true,
-            acceptance: recorded.acceptance,
-            cash: recorded.cash,
-          }),
-        );
+        setPaidSource({
+          kind: "Recorded",
+          recordedAfterOutage: true,
+          acceptance: recorded.acceptance,
+          cash: recorded.cash === null ? null : { changeMinor: recorded.cash.changeMinor },
+        });
       } else if (paperOutcome?.error.code === "AlreadyPaid") {
         // A retry minted a new payment operation (the tender, slip or time was changed after no
         // answer) but the first one was recorded: the sale is in the takings, never "to charge".
         setPhase("Paid");
         setChangeDue(null);
-        setPaidNote(paperAlreadyRecordedText());
+        setPaidSource({ kind: "PaperAlreadyRecorded" });
       } else if (order.paid === true) {
         // DEC-PAPER-SEND-IDEMPOTENT: the order sent again was paid meanwhile (charged from Orders
         // or another tablet while this page had no answer): never asked to be charged again.
         setPhase("Paid");
         setChangeDue(null);
-        setPaidNote(
-          order.recordedAfterOutage
-            ? paperAlreadyRecordedText()
-            : t(
-                "Order {number} is already paid; its payment is recorded. Don't charge the guest again; Orders shows it.",
-                { number: order.orderNumber },
-              ),
-        );
+        setPaidSource({
+          kind: "AlreadyPaid",
+          orderNumber: order.orderNumber,
+          paper: order.recordedAfterOutage,
+        });
       } else {
         if (paperOutcome !== null && paperPayment !== undefined) {
           // Placed, but its payment was not recorded: the same payment, recorded again below.
@@ -2137,7 +2235,7 @@ export function StaffOrderEntryPage({
         setCashUnanswered(false);
         setProblem(null);
         setChangeDue(null);
-        setPaidNote(paperAlreadyRecordedText());
+        setPaidSource({ kind: "PaperAlreadyRecorded" });
         setPhase("Paid");
         setAwaitingKey((value) => value + 1);
         return;
@@ -2172,14 +2270,12 @@ export function StaffOrderEntryPage({
     // Order's current version), so it reaches the kitchen even if this page is closed now.
     setPhase(recorded.acceptance === "Accepted" ? "Accepted" : "Paid");
     setChangeDue(recorded.cash?.changeMinor ?? null);
-    setPaidNote(
-      paidNoteText({
-        tableMode,
-        recordedAfterOutage: placed.recordedAfterOutage,
-        acceptance: recorded.acceptance,
-        cash: recorded.cash,
-      }),
-    );
+    setPaidSource({
+      kind: "Recorded",
+      recordedAfterOutage: placed.recordedAfterOutage,
+      acceptance: recorded.acceptance,
+      cash: recorded.cash === null ? null : { changeMinor: recorded.cash.changeMinor },
+    });
   };
 
   // WP-2423 M127: "Back to edit": the unpaid order was cancelled (entered by mistake); the same
@@ -2194,8 +2290,8 @@ export function StaffOrderEntryPage({
     setRecordAgain(false);
     setChangeDue(null);
     setProblem(null);
-    setPaidNote(null);
-    setRemovedNote(null);
+    setPaidSource(null);
+    setRemovedSource(null);
     setSentGuest([]);
     setPaidAtRefused(false);
     sendAnswered();
@@ -2225,8 +2321,8 @@ export function StaffOrderEntryPage({
     setProblemNeedsTableCode(false);
     refusalRead.current += 1;
     setTableHold(null);
-    setPaidNote(null);
-    setRemovedNote(null);
+    setPaidSource(null);
+    setRemovedSource(null);
     setSentGuest([]);
     setPaidAtRefused(false);
     sendAnswered();
@@ -2420,6 +2516,7 @@ export function StaffOrderEntryPage({
           paidOrderReferences={paidHere}
           onExcludedCancellable={setPlacedCancellable}
           onCharging={setResumedCharging}
+          keptKey={"counterPaid:" + storeReference}
         />
       )}
       {/* DEC-PAPER-SEND-IDEMPOTENT: a send from before this page was reloaded got no answer. */}
