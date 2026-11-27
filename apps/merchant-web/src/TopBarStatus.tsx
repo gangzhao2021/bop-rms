@@ -45,3 +45,17 @@ export function TopBarStatus({ children }: { readonly children: ReactNode }) {
   if (slot !== null && tablet) return createPortal(children, slot);
   return <>{children}</>;
 }
+
+/**
+ * Batch 65 (v15 b64: Products, Prices, Stock counts and Item availability had no "Updated 14:02",
+ * only a date in their body text): the one stamp of a page that draws its own heading (a
+ * `screen-heading` inside AppFrame) instead of WorkspacePage. In the tablet top bar as on every
+ * other page, else at the heading's end beside the page's actions, where WorkspacePage puts it.
+ */
+export function PageStamp({ children }: { readonly children: ReactNode }) {
+  return (
+    <TopBarStatus>
+      <div className="workspace-page__status page-stamp">{children}</div>
+    </TopBarStatus>
+  );
+}

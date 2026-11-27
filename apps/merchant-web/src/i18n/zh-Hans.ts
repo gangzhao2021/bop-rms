@@ -1551,8 +1551,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Couldn't load the staff list": "无法加载员工列表",
   "Couldn't load this page": "无法加载此页面",
   "Couldn't read the amount to charge. Try again.": "无法读取应收金额。请重试。",
-  "Count one storage location at a time, ideally while the Store is closed. Counters count blind; a manager explains the differences and posts them. Source as of":
-    "一次清点一个存放位置，最好在门店不营业时进行。清点人盲盘；由店长说明差异并过账。数据截至",
+  "Count one storage location at a time, ideally while the Store is closed. Counters count blind; a manager explains the differences and posts them.":
+    "一次清点一个存放位置，最好在门店不营业时进行。清点人盲盘；由店长说明差异并过账。",
   "Count what the Store holds before it opens. Posting turns the count into the Store's opening stock, once. Source as of":
     "开业前清点门店的库存。过账后盘点即成为门店的期初库存，只此一次。数据截至",
   "Count · {location}": "盘点 · {location}",

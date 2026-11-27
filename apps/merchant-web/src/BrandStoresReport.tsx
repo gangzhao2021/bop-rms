@@ -31,12 +31,18 @@ export function BrandStoresReport({
   currentStoreReference,
   revision,
   onSwitchStore,
+  onRead,
 }: {
   readonly client: Pick<StoreReportsClient, "storeTonight">;
   readonly stores: readonly { readonly storeReference: string; readonly storeLabel: string }[];
   readonly currentStoreReference: string;
   readonly revision: number;
   readonly onSwitchStore: (storeReference: string) => void;
+  /**
+   * Batch 65 (v15 b64: the Stores tab had no "Updated 14:02"): once every Store has answered, when
+   * the oldest figures shown were read, for the page's one stamp. Null while nothing is shown.
+   */
+  readonly onRead?: (at: string | null) => void;
 }) {
   const [rows, setRows] = useState<ReadonlyMap<string, Row>>(new Map());
   useEffect(() => {
@@ -62,6 +68,20 @@ export function BrandStoresReport({
     const row = rows.get(store.storeReference);
     return row?.kind === "Ready" ? [row.summary] : [];
   });
+  const settled = stores.every((store) => {
+    const kind = rows.get(store.storeReference)?.kind;
+    return kind !== undefined && kind !== "Loading";
+  });
+  const oldest = settled
+    ? ready.reduce<string | null>(
+        (first, summary) =>
+          first === null || Date.parse(summary.report.generatedAt) < Date.parse(first)
+            ? summary.report.generatedAt
+            : first,
+        null,
+      )
+    : null;
+  useEffect(() => onRead?.(oldest), [onRead, oldest]);
   const total = (pick: (summary: TonightSummary) => string) =>
     ready.reduce((sum, summary) => sum + BigInt(pick(summary)), 0n);
   return (

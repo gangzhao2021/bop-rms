@@ -4,7 +4,8 @@ import { t } from "./i18n/i18n.js";
 import { noAccessHeading } from "./access-denied.js";
 import { NoAccessNotice } from "./NoAccessNotice.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
-import { SourceTime } from "./StoreTime.js";
+import { Freshness, SourceTime } from "./StoreTime.js";
+import { PageStamp } from "./TopBarStatus.js";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { newOperationReference } from "./operation-reference.js";
@@ -312,11 +313,6 @@ export function StorePriceList({
             summary={t(
               "To change one dish's price, open it on the Menu page. To change several prices together, start a price change here.",
             )}
-            aside={
-              <>
-                {t("Updated")} <SourceTime instant={view.sourceAsOf} />
-              </>
-            }
           >
             <p>
               {t(
@@ -332,6 +328,12 @@ export function StorePriceList({
               )}
             </p>
           </PageIntro>
+        </div>
+        <div className="screen-heading__tools">
+          {/* Batch 65: the page's one "Updated 14:02", where every staff page shows it. */}
+          <PageStamp>
+            <Freshness status="Fresh" at={view.sourceAsOf} />
+          </PageStamp>
         </div>
       </header>
       <section className="detail-section" aria-labelledby="store-prices">

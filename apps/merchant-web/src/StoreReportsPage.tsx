@@ -660,6 +660,8 @@ export function StoreReportsPage({
     readonly at: string;
     readonly stale: boolean;
   } | null>(null);
+  // Batch 65: when the Stores tab's oldest figures were read, for the same one stamp.
+  const [storesReadAt, setStoresReadAt] = useState<string | null>(null);
   const [tab, setTab] = useState<"Tonight" | "Period" | "Stores">(
     initialTab === "Stores" && stores.length < 2 ? "Tonight" : initialTab,
   );
@@ -773,6 +775,8 @@ export function StoreReportsPage({
           <Freshness status="Fresh" at={view.generatedAt} />
         ) : tab === "Tonight" && tonightRead !== null ? (
           <Freshness status={tonightRead.stale ? "Stale" : "Fresh"} at={tonightRead.at} />
+        ) : tab === "Stores" && storesReadAt !== null ? (
+          <Freshness status="Fresh" at={storesReadAt} />
         ) : null
       }
       actions={
@@ -821,6 +825,7 @@ export function StoreReportsPage({
           currentStoreReference={currentStoreReference}
           revision={revision}
           onSwitchStore={onSwitchStore}
+          onRead={setStoresReadAt}
         />
       ) : null}
       {tab !== "Period" ? null : (

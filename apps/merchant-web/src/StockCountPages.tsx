@@ -4,7 +4,8 @@ import { offlineCheckBeforeRepeatText } from "./failure-words.js";
 import { noAccessHeading } from "./access-denied.js";
 import { NoAccessNotice } from "./NoAccessNotice.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
-import { SourceTime, StaffTime, StoreDate } from "./StoreTime.js";
+import { Freshness, StaffTime, StoreDate } from "./StoreTime.js";
+import { PageStamp } from "./TopBarStatus.js";
 import { unitText } from "./recipe-pages.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
@@ -281,10 +282,16 @@ export function StockCountListPage({
           <h2>{t("Stock counts")}</h2>
           <p>
             {t(
-              "Count one storage location at a time, ideally while the Store is closed. Counters count blind; a manager explains the differences and posts them. Source as of",
-            )}{" "}
-            <SourceTime instant={view.sourceAsOf} />
+              "Count one storage location at a time, ideally while the Store is closed. Counters count blind; a manager explains the differences and posts them.",
+            )}
           </p>
+        </div>
+        <div className="screen-heading__tools">
+          {/* Batch 65: the page's one "Updated 14:02", where every staff page shows it (it was
+              "Source as of Wed, Nov 25 20:26" at the end of this explanation). */}
+          <PageStamp>
+            <Freshness status="Fresh" at={view.sourceAsOf} />
+          </PageStamp>
         </div>
       </header>
       <StockShortageNotice view={view} />

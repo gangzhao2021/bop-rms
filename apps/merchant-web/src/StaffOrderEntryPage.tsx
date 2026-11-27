@@ -27,7 +27,7 @@ import {
 import { validSlipReference } from "./CardMachineRefundAction.js";
 import { orderMoney } from "./order-money.js";
 import { serviceOperationReference } from "./service-control-client.js";
-import { storeTime } from "./StoreTime.js";
+import { Freshness, storeTime } from "./StoreTime.js";
 import { WorkspacePage } from "./WorkspacePage.js";
 import { CounterAwaitingPayment } from "./CounterAwaitingPayment.js";
 import { CounterCancelAction } from "./CounterCancelAction.js";
@@ -1022,7 +1022,8 @@ export function StaffOrderEntryPage({
   const [menu, setMenu] = useState<
     | { kind: "Loading" }
     | { kind: "Error"; code: string; checkout?: "CheckingOut" | "Paid" }
-    | { kind: "Ready"; menu: CounterMenu }
+    /** Batch 65: `readAt`, when this device last read the menu, for the page's one stamp. */
+    | { kind: "Ready"; menu: CounterMenu; readAt: string }
   >({ kind: "Loading" });
   const [reload, setReload] = useState(0);
   // v15 b12: switching the language reloads the page; the order being taken comes back with it.
@@ -1306,7 +1307,7 @@ export function StaffOrderEntryPage({
           setMenu({ kind: "Error", code: "TableCheckingOut", checkout });
           return;
         }
-        setMenu({ kind: "Ready", menu: value });
+        setMenu({ kind: "Ready", menu: value, readAt: new Date().toISOString() });
         // Batch 65: a round kept on this device for another party (the table was closed and
         // seated again, or is free now) is not this party's: it is dropped.
         const saved = savedRoundCheck.current;
@@ -1471,7 +1472,11 @@ export function StaffOrderEntryPage({
       .loadMenu(controller.signal, tableMode ? "DineIn" : "Pickup")
       .then((value) => {
         if (controller.signal.aborted) return;
-        setMenu((current) => (current.kind === "Ready" ? { kind: "Ready", menu: value } : current));
+        setMenu((current) =>
+          current.kind === "Ready"
+            ? { kind: "Ready", menu: value, readAt: new Date().toISOString() }
+            : current,
+        );
         // WP-2423 M165: the ticket follows the menu just read; staff see what changed before
         // anything is sent, and a changed ticket is a new order intent.
         const rebound = rebindLines(linesNow.current, value);
@@ -2374,6 +2379,9 @@ export function StaffOrderEntryPage({
                 )
           : t("{store} · Pickup · paid at the counter, card machine or cash", { store: storeLabel })
       }
+      // Batch 65 (v15 b64: no "Updated" at any width): when the menu was last read; it is read
+      // again quietly every 30 s and after each send, so the stamp moves with it.
+      status={<Freshness status="Fresh" checkedAt={menu.readAt} timeZone={timeZone} />}
       className="counter-order"
     >
       {/* WP-2423 (v15 751dd768): sent counter orders not paid yet, from the server. */}

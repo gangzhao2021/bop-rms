@@ -115,3 +115,22 @@ it("batch 64: before the Store's zone is known, the stamp reads this device's cl
   expect(text).toBe(`Updated ${clock}`);
   expect(text).not.toMatch(/UTC/u);
 });
+
+it("batch 65: a read that names its Store's zone is stamped in that zone, over the page's and the device's", () => {
+  // Item availability (also on the kitchen display, which has no Store zone around it) and Table
+  // QR codes pass the zone their read names; 01:26 UTC is 20:26 in Toronto the evening before.
+  const stamp = (context: string | undefined) =>
+    renderToStaticMarkup(
+      createElement(
+        StoreTimeZoneContext.Provider,
+        { value: context },
+        createElement(Freshness, {
+          status: "Fresh",
+          at: "2026-11-26T01:26:00.000Z",
+          timeZone: "America/Toronto",
+        }),
+      ),
+    ).replace(/<[^>]+>/gu, "");
+  expect(stamp(undefined)).toBe("Updated 20:26");
+  expect(stamp("Asia/Shanghai")).toBe("Updated 20:26");
+});

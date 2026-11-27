@@ -4,7 +4,8 @@ import { noAccessHeading } from "./access-denied.js";
 import { NoAccessNotice } from "./NoAccessNotice.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
 import { Link } from "react-router";
-import { CheckedTime } from "./StoreTime.js";
+import { Freshness } from "./StoreTime.js";
+import { PageStamp } from "./TopBarStatus.js";
 import {
   KitchenDisplayHeaderControls,
   KitchenDisplayNavigation,
@@ -380,7 +381,6 @@ export function StoreAvailabilityPage({
                 ? t("Mark a size sold out when it runs out.")
                 : t("What customers can order at this Store right now.")
             }
-            aside={<CheckedTime instant={view.sourceAsOf} timeZone={view.timeZone} />}
           >
             {floorOnly ? (
               <p>
@@ -396,6 +396,13 @@ export function StoreAvailabilityPage({
               </p>
             )}
           </PageIntro>
+        </div>
+        <div className="screen-heading__tools">
+          {/* Batch 65: the page's one "Updated 14:02", where every staff page shows it (it was
+              "Checked 20:26 today" after the line above). */}
+          <PageStamp>
+            <Freshness status="Fresh" at={view.sourceAsOf} timeZone={view.timeZone} />
+          </PageStamp>
         </div>
       </header>
       {message ? (

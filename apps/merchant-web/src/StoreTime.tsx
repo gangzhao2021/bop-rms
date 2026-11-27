@@ -248,15 +248,18 @@ export function Freshness({
   status,
   at,
   checkedAt,
+  timeZone: readZone,
 }: {
   readonly status: "Fresh" | "Stale" | "Current" | "Rebuilding" | "Failed";
   readonly at?: string | undefined;
   readonly checkedAt?: string | undefined;
+  /** Batch 65: the Store's zone as the read itself names it (Item availability does). */
+  readonly timeZone?: string | undefined;
 }) {
   // Batch 64: before the Store's zone is known, this device's clock, which on a store tablet is
   // the Store's; never "14:02 UTC" in the one stamp of a page.
-  const timeZone =
-    useContext(StoreTimeZoneContext) ?? new Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const contextZone = useContext(StoreTimeZoneContext);
+  const timeZone = readZone ?? contextZone ?? new Intl.DateTimeFormat().resolvedOptions().timeZone;
   const stale = status !== "Fresh" && status !== "Current";
   const read = checkedAt ?? at;
   const when = read === undefined ? null : storeTime(read, timeZone);

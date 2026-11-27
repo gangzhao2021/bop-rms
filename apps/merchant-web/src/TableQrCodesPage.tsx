@@ -9,6 +9,7 @@ import {
   type TableQrRow,
 } from "./table-qr-client.js";
 import { WorkspacePage } from "./WorkspacePage.js";
+import { Freshness } from "./StoreTime.js";
 import { noAccessHeading } from "./access-denied.js";
 import { NoAccessNotice } from "./NoAccessNotice.js";
 import { sentences } from "./word-gap.js";
@@ -24,6 +25,8 @@ type Load =
       readonly kind: "Ready";
       readonly rows: readonly TableQrRow[];
       readonly pickupLink?: string | null;
+      /** Batch 65: when this device read the list, for the page's one "Updated 14:02". */
+      readonly readAt?: string;
     }
   | { readonly kind: "PermissionDenied" | "Unavailable" };
 interface Pending {
@@ -103,7 +106,8 @@ export function TableQrCodesPage({
     void client
       .overview(controller.signal)
       .then(({ rows, pickupLink }) => {
-        if (!controller.signal.aborted) setLoad({ kind: "Ready", rows, pickupLink });
+        if (!controller.signal.aborted)
+          setLoad({ kind: "Ready", rows, pickupLink, readAt: new Date().toISOString() });
       })
       .catch((error: unknown) => {
         if (!controller.signal.aborted)
@@ -592,6 +596,12 @@ export function TableQrCodesPage({
       className="table-qr-page"
       title={t("Table QR codes")}
       meta={storeLabel}
+      // Batch 65 (v15 b64: no "Updated" at any width): the page's one stamp, from the last read.
+      status={
+        load.kind === "Ready" && load.readAt !== undefined ? (
+          <Freshness status="Fresh" checkedAt={load.readAt} timeZone={timeZone} />
+        ) : null
+      }
       actions={
         <>
           {/* Batch 40: someone refused this page is offered nothing it can't do. */}

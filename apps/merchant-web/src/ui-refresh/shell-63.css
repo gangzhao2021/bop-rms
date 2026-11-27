@@ -322,3 +322,40 @@ a.shell-action {
   order: 100;
   min-width: 0;
 }
+
+/*
+ * Batch 65 (v15 b64: Products, Prices, Stock counts and Item availability had no "Updated 14:02"):
+ * a page that draws its own heading (screen-heading) keeps its stamp and its actions together at
+ * the heading's end, as WorkspacePage does: beside the title on a wide screen, on a line of their
+ * own at the right when the heading's words need the width. On a tablet the stamp is in the top
+ * bar. The heading's words take the room; the stamp is never squeezed into two lines.
+ */
+.screen-heading:has(> .screen-heading__tools) {
+  align-items: flex-start;
+}
+.screen-heading:has(> .screen-heading__tools) > :first-child {
+  flex: 1 1 20rem;
+  min-width: 0;
+}
+.screen-heading__tools {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px 16px;
+  margin-inline-start: auto;
+}
+.screen-heading__tools:empty {
+  display: none;
+}
+.screen-heading__tools .page-stamp {
+  white-space: nowrap;
+}
+.page-stamp .workspace-page__freshness {
+  color: var(--bop-color-text-muted);
+  font-size: var(--bop-type-small);
+}
+.page-stamp .workspace-page__freshness[data-freshness="Stale"] {
+  color: var(--bop-color-warning);
+}

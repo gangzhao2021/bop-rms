@@ -3,7 +3,8 @@ import { currentLanguage, listSeparator, t } from "./i18n/i18n.js";
 import { noAccessHeading } from "./access-denied.js";
 import { NoAccessNotice } from "./NoAccessNotice.js";
 import { AppFrame, StatePanel } from "@bop-rms/ui";
-import { SourceTime } from "./StoreTime.js";
+import { Freshness, SourceTime } from "./StoreTime.js";
+import { PageStamp } from "./TopBarStatus.js";
 import { useCallback, useEffect, useId, useRef, useState, type Ref } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { newOperationReference } from "./operation-reference.js";
@@ -140,14 +141,7 @@ export function ProductListPage({
         <div>
           <p className="bop-eyebrow">{t("Products · Brand")}</p>
           <h2>{t("Products")}</h2>
-          <PageIntro
-            summary={t("Shared by every Store of the Brand.")}
-            aside={
-              <>
-                {t("Updated")} <SourceTime instant={view.sourceAsOf} />
-              </>
-            }
-          >
+          <PageIntro summary={t("Shared by every Store of the Brand.")}>
             <p>
               {t(
                 "Products and their sizes are shared by every Store of the Brand. A size is what a customer orders; prices, menus and recipes refer to it.",
@@ -155,11 +149,17 @@ export function ProductListPage({
             </p>
           </PageIntro>
         </div>
-        {view.permissions.mayCreate ? (
-          <Link className="primary-action-link" to="/app/commerce/products/new">
-            {t("New product")}
-          </Link>
-        ) : null}
+        <div className="screen-heading__tools">
+          {/* Batch 65: the page's one "Updated 14:02", where every staff page shows it. */}
+          <PageStamp>
+            <Freshness status="Fresh" at={view.sourceAsOf} />
+          </PageStamp>
+          {view.permissions.mayCreate ? (
+            <Link className="primary-action-link" to="/app/commerce/products/new">
+              {t("New product")}
+            </Link>
+          ) : null}
+        </div>
       </header>
       {view.products.length === 0 ? (
         <StatePanel heading={t("No products yet")} status>
