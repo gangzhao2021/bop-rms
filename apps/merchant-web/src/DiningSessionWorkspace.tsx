@@ -78,6 +78,7 @@ import {
   TablePanelPhones,
 } from "./TablePhones.js";
 import { TableCartPanel } from "./TableCartPanel.js";
+import { StaffCallUnsentDishes, useCallUnsentDishes } from "./StaffCallUnsentDishes.js";
 import { TablesOfflineGuide } from "./TablesOfflineGuide.js";
 import {
   browserOffline,
@@ -2293,6 +2294,15 @@ function TablePanel({
   const checkingOut = table.session?.phase === "Closing";
   const hasOrder = Boolean(table.session?.orderReference);
   const roundOffer = staffRoundOffer(table, settled);
+  // Batch 66 (v15 b65 live): while a guest's call is open, the dishes the table didn't send.
+  const callDishes = useCallUnsentDishes({
+    open: seated && table.staffCall != null,
+    diningSessionReference: table.currentDiningSessionReference,
+    csrf,
+    refreshKey: refreshKey + ":" + String(checkoutRevision),
+  });
+  // The call's list says the round step itself; the panel says it once.
+  const roundSaidWithCall = callDishes.length > 0 && canTakeOrders;
   // Batch 49 (v15 b48 live): that no one new can join a table checking out is said once in the
   // panel: in the outcome line when a refused step just said it, else where the phones are, else
   // (no phones block for this role) where New join code was.
@@ -2354,6 +2364,17 @@ function TablePanel({
           {notice.text}
         </p>
       ))}
+      {table.currentDiningSessionReference === null ? null : (
+        <StaffCallUnsentDishes
+          lines={callDishes}
+          tableReference={table.tableReference}
+          tableLabel={table.stableLabel}
+          roundOffer={roundOffer}
+          canTakeOrders={canTakeOrders}
+          paymentStarted={table.session?.paymentStarted === true}
+          fullyRefunded={fullyRefunded}
+        />
+      )}
       {table.roundsAwaitingAcceptance.length > 0 && table.session?.orderReference ? (
         // v15 batch 7: straight to the order, where Accept and Can't make it · refund are, on
         // whatever day or page of Orders it was placed.
@@ -2431,7 +2452,7 @@ function TablePanel({
       ) : seated ? (
         <p className="table-panel__notice">{t("Nothing ordered yet.")}</p>
       ) : null}
-      {seated && !hasOrder && canTakeOrders && roundOffer === "Offered" ? (
+      {seated && !hasOrder && canTakeOrders && roundOffer === "Offered" && !roundSaidWithCall ? (
         // b63 (F34, T4): with nothing ordered, taking the order is the one step due: the primary.
         <Link
           className="table-panel__primary"
@@ -2576,7 +2597,9 @@ function TablePanel({
           )}
         </section>
       ) : null}
-      {canTakeOrders && roundOffer === "Offered" && !(seated && !hasOrder) ? (
+      {roundSaidWithCall ? null : canTakeOrders &&
+        roundOffer === "Offered" &&
+        !(seated && !hasOrder) ? (
         // WP-2423 Q7 slice 2: a round for guests who can't or won't order on a phone (or a
         // paper order entered after an outage); it joins the table's order, or opens the table.
         <Link

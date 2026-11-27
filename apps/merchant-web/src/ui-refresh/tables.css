@@ -864,6 +864,39 @@
 .workspace-page.tables-v3 .table-panel__notice[data-tier="urgent"] {
   color: var(--bop-color-danger);
 }
+/*
+ * Batch 66 (v15 b65 live): under a guest's open call, the dishes the table didn't send: no box,
+ * a 16/600 heading, one dish a line (16/400) with who added it in grey 14, then the one step.
+ */
+.workspace-page.tables-v3 .table-call-dishes h3 {
+  margin: 8px 0 4px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.workspace-page.tables-v3 .table-call-dishes ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.workspace-page.tables-v3 .table-call-dishes li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 8px;
+  padding: 4px 0;
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+.workspace-page.tables-v3 .table-call-dishes__who {
+  color: var(--bop-color-text-muted);
+  font-size: 14px;
+  line-height: 24px;
+}
+.workspace-page.tables-v3 .table-call-dishes .table-panel__text-step {
+  justify-content: flex-start;
+  padding: 0;
+  white-space: normal;
+  text-align: left;
+}
 /* v15 batch 7: the link to the order whose paid round waits (Accept, Can't make it · refund). */
 .workspace-page.tables-v3 .table-panel__notice-action {
   margin: 4px 0 0;

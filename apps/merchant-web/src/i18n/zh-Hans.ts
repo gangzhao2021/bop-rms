@@ -4181,6 +4181,8 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Review approvals": "去审批",
   "Ready to pay": "可以买单",
   "A problem with their order": "所点的菜有问题",
+  "Not sent to the kitchen": "没送到厨房",
+  "Order these for table {stableLabel}": "为桌台 {stableLabel} 点这些菜",
   "A question": "有问题想问",
   "Water, cutlery, napkins": "水、餐具、纸巾",
   "Guest asked for staff just now · {reason}": "客人刚刚请店员过去 · {reason}",
