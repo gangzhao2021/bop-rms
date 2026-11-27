@@ -6087,6 +6087,7 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "{rounds} entered by staff wasn't paid by {at} and is being cancelled; it won't go to the kitchen. If the card machine was charged, refund it on the machine.":
     "员工录入的{rounds}未在 {at} 前付款，正在取消；不会发送到厨房。如果刷卡机已收款，请在刷卡机上退款。",
   "{seatedCount} seated": "{seatedCount} 张有客",
+  "{served} of {ordered} items served.": "已上 {served}/{ordered} 项。",
   "{served} served.": "已上桌 {served}。",
   "{setName} · {optionName} on {productName}": "{productName}上的{setName} · {optionName}",
   "{shown} of {total} orders match.": "{total} 笔订单中有 {shown} 笔符合。",

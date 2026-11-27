@@ -24,14 +24,27 @@ export function readyToServe(view: DiningProgress, batchSequence?: number): read
 
 const items = (count: number) => (count === 1 ? t("1 item") : t("{count} items", { count: count }));
 
-/** The result in staff words: what was served and what still needs a look. */
-export function serveReadySummary(result: DiningServeReadyResult): string {
+/**
+ * The result in staff words: what was served and what still needs a look.
+ * Batch 67 (v15 b66 live, D66 A): "All served" under one round said "All 2 items marked served."
+ * while the table's next round still had a dish to serve. With `table` (the whole table's dishes,
+ * served and ordered, after this serve), a table with more to serve is said as such instead.
+ */
+export function serveReadySummary(
+  result: DiningServeReadyResult,
+  table?: { readonly served: number; readonly ordered: number } | null,
+): string {
   const parts: string[] = [];
   const notServed = result.changed + result.failed;
   if (result.served > 0)
     parts.push(
       notServed === 0 && result.alreadyServed === 0
-        ? t("All {served} marked served.", { served: items(result.served) })
+        ? table != null && table.served < table.ordered
+          ? t("{served} of {ordered} items served.", {
+              served: table.served,
+              ordered: table.ordered,
+            })
+          : t("All {served} marked served.", { served: items(result.served) })
         : t("{served} served.", { served: result.served }),
     );
   if (result.alreadyServed > 0)

@@ -135,6 +135,19 @@ export function roundServedCount(
   };
 }
 
+/** Batch 67: the whole table's dishes served and ordered (cancelled and rejected ones left out). */
+export function tableServedCount(items: readonly Item[]): {
+  readonly served: number;
+  readonly ordered: number;
+} | null {
+  const open = items.filter((item) => item.phase !== "Cancelled" && item.phase !== "Rejected");
+  if (open.length === 0) return null;
+  return {
+    served: open.reduce((sum, item) => sum + item.deliveredQuantity, 0),
+    ordered: open.reduce((sum, item) => sum + item.orderedQuantity, 0),
+  };
+}
+
 /** Where a round as a whole is, from its dishes: the least advanced open dish names it. */
 export function roundStateText(
   items: readonly Item[],
@@ -498,6 +511,20 @@ export function DiningRoundsProvider({
       if (view === null) return;
       const lines = readyToServe(view, sequence).slice(0, DINING_SERVE_READY_MAX_LINES);
       if (lines.length === 0) return;
+      const servedOf = (result: unknown) => {
+        const outcomes = new Map(
+          (result as Parameters<typeof serveReadySummary>[0]).lines.map((line) => [
+            line.orderItemReference,
+            line.outcome,
+          ]),
+        );
+        return lines
+          .filter((item) => outcomes.get(item.orderItemReference) === "Served")
+          .map((item) => ({
+            orderItemReference: item.orderItemReference,
+            quantity: servableQuantity(item),
+          }));
+      };
       void run(
         "round:" + sequence,
         () =>
@@ -513,22 +540,14 @@ export function DiningRoundsProvider({
               expectedItemServiceVersion: item.itemServiceVersion,
             })),
           }),
-        (result) => serveReadySummary(result as Parameters<typeof serveReadySummary>[0]),
+        (result) =>
+          // Batch 67: the line says the whole table, so another round's dish is never "all served".
+          serveReadySummary(
+            result as Parameters<typeof serveReadySummary>[0],
+            tableServedCount(servedNow(view, servedOf(result)).items),
+          ),
         refusedServe,
-        (result) => {
-          const outcomes = new Map(
-            (result as Parameters<typeof serveReadySummary>[0]).lines.map((line) => [
-              line.orderItemReference,
-              line.outcome,
-            ]),
-          );
-          return lines
-            .filter((item) => outcomes.get(item.orderItemReference) === "Served")
-            .map((item) => ({
-              orderItemReference: item.orderItemReference,
-              quantity: servableQuantity(item),
-            }));
-        },
+        servedOf,
       );
     },
   };

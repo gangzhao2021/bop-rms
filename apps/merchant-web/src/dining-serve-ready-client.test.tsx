@@ -109,3 +109,16 @@ it("summarises the result in staff words without internal codes", () => {
   for (const text of [summary(1, 1, 1, 1), summary(3, 3, 3, 3)])
     expect(text).not.toMatch(/[a-z]+_[a-z]+|[A-Z]{3,}|[0-9a-f]{8}-/u);
 });
+
+// Batch 67 (v15 b66 live, D66 A): "All served" under round 1 said "All 2 items marked served."
+// while round 2 still had a dish to serve. The line now says the whole order's dishes.
+it("b67: a round served while another round still has a dish says how many of the order are served", () => {
+  const result = { served: 2, alreadyServed: 0, changed: 0, failed: 0, lines: [] };
+  expect(serveReadySummary(result, { served: 2, ordered: 3 })).toBe("2 of 3 items served.");
+  expect(serveReadySummary(result, { served: 3, ordered: 3 })).toBe("All 2 items marked served.");
+  expect(serveReadySummary(result, null)).toBe("All 2 items marked served.");
+  // A partial answer keeps saying what still needs a look.
+  expect(serveReadySummary({ ...result, changed: 1 }, { served: 2, ordered: 4 })).toMatch(
+    /^2 served\. 1 could not be served/u,
+  );
+});
