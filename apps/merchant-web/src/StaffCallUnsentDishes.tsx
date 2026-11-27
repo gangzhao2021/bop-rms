@@ -13,6 +13,15 @@ import { staffRoundRefusedShortText, type StaffRoundOffer } from "./staff-round-
  * that adds them: a staff round, which opens with them already in it (staff check and send). A
  * table checking out takes no round, so it says what to do first instead.
  */
+export function callAsksForUnsentDishes(
+  call: { readonly reason: string } | null | undefined,
+): boolean {
+  // Review of batch 66: only the Cart's "Ask staff to add these" sends OrderProblem about these
+  // dishes. A guest who asks for water, the bill or a question while a dish sits undecided in the
+  // shared cart did not ask staff to send it, so the list (and its "Order these") is not shown.
+  return call?.reason === "OrderProblem";
+}
+
 export function useCallUnsentDishes(input: {
   readonly open: boolean;
   readonly diningSessionReference: string | null;

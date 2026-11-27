@@ -66,6 +66,8 @@ const menu = {
 interface State {
   phase: "Active" | "Closing";
   version: number;
+  /** What the guest's open call asked for; the Cart's "Ask staff to add these" sends OrderProblem. */
+  reason?: "OrderProblem" | "TableNeeds" | "ReadyToPay" | "Question";
 }
 
 const bill = (state: State) => ({
@@ -186,7 +188,7 @@ async function signIn(page: Page, state: State, language: "en" | "zh-Hans") {
             paymentTiming: "PayLater",
             staffCall: {
               callReference: id(90),
-              reason: "OrderProblem",
+              reason: state.reason ?? "OrderProblem",
               calledAt: new Date(Date.now() - 20_000).toISOString(),
             },
             session: {
@@ -300,6 +302,11 @@ const words = {
     order: "Order these for table T7",
     take: "Take order for table T7",
     guests: "From the guests' phones (not sent yet)",
+    otherCalls: [
+      ["TableNeeds", "Guest asked for staff just now · Water, cutlery, napkins"],
+      ["ReadyToPay", "Guest asked for staff just now · Ready to pay"],
+      ["Question", "Guest asked for staff just now · A question"],
+    ],
   },
   "zh-Hans": {
     select: "选择 T7",
@@ -312,6 +319,11 @@ const words = {
     order: "为桌台 T7 点这些菜",
     take: "为桌台 T7 点单",
     guests: "客人手机上还没送出的菜",
+    otherCalls: [
+      ["TableNeeds", "客人刚刚请店员过去 · 水、餐具、纸巾"],
+      ["ReadyToPay", "客人刚刚请店员过去 · 可以买单"],
+      ["Question", "客人刚刚请店员过去 · 有问题想问"],
+    ],
   },
 } as const;
 
@@ -411,4 +423,24 @@ for (const language of ["en", "zh-Hans"] as const) {
     expect(rounds).toEqual([]);
     await page.screenshot({ path: `${shots}/order-entry-${language}.png`, fullPage: true });
   });
+
+  // Review of batch 66: only the Cart's "Ask staff to add these" call (OrderProblem) is about the
+  // unsent dishes. A guest who asks for water, the bill or a question while a dish sits undecided
+  // in the shared cart did not ask staff to send it: no list, and the panel's own round link stays.
+  for (const [reason, call] of said.otherCalls) {
+    test(`@production a ${reason} call does not list the table's unsent dishes as if the guest asked for them (${language})`, async ({
+      page,
+    }) => {
+      const state: State = { phase: "Active", version: 7, reason };
+      await signIn(page, state, language);
+      await page.goto("/operations/dining");
+      await page.getByRole("button", { name: said.select, exact: true }).click();
+      const panel = page.getByRole("complementary", { name: said.panel });
+      await expect(panel.getByRole("note").first()).toHaveText(call);
+      await expect(panel.getByRole("link", { name: said.take })).toBeVisible();
+      await expect(panel.locator(".table-call-dishes")).toHaveCount(0);
+      await expect(panel.getByRole("link", { name: said.order })).toHaveCount(0);
+      await expect(panel.getByText(said.heading, { exact: true })).toHaveCount(0);
+    });
+  }
 }

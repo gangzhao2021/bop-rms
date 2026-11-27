@@ -78,7 +78,11 @@ import {
   TablePanelPhones,
 } from "./TablePhones.js";
 import { TableCartPanel } from "./TableCartPanel.js";
-import { StaffCallUnsentDishes, useCallUnsentDishes } from "./StaffCallUnsentDishes.js";
+import {
+  callAsksForUnsentDishes,
+  StaffCallUnsentDishes,
+  useCallUnsentDishes,
+} from "./StaffCallUnsentDishes.js";
 import { TablesOfflineGuide } from "./TablesOfflineGuide.js";
 import {
   browserOffline,
@@ -2294,9 +2298,10 @@ function TablePanel({
   const checkingOut = table.session?.phase === "Closing";
   const hasOrder = Boolean(table.session?.orderReference);
   const roundOffer = staffRoundOffer(table, settled);
-  // Batch 66 (v15 b65 live): while a guest's call is open, the dishes the table didn't send.
+  // Batch 66 (v15 b65 live): while a guest's call about unsent dishes is open, the dishes the
+  // table didn't send.
   const callDishes = useCallUnsentDishes({
-    open: seated && table.staffCall != null,
+    open: seated && callAsksForUnsentDishes(table.staffCall),
     diningSessionReference: table.currentDiningSessionReference,
     csrf,
     refreshKey: refreshKey + ":" + String(checkoutRevision),

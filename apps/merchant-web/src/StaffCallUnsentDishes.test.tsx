@@ -3,7 +3,11 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { StaffCallUnsentDishes, useCallUnsentDishes } from "./StaffCallUnsentDishes.js";
+import {
+  callAsksForUnsentDishes,
+  StaffCallUnsentDishes,
+  useCallUnsentDishes,
+} from "./StaffCallUnsentDishes.js";
 import type { TableCartLine } from "./table-cart-client.js";
 
 // Batch 66 (v15 b65 live, guest-cart-and-payments): a guest pressed "Ask staff to add these" with
@@ -120,5 +124,12 @@ describe("the dishes the table didn't send, under a guest's open call", () => {
     await act(async () => root.render(<Probe open />));
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(seen.at(-1)).toBe(1);
+  });
+
+  it("is about the unsent dishes only for the Cart's OrderProblem call", () => {
+    expect(callAsksForUnsentDishes({ reason: "OrderProblem" })).toBe(true);
+    for (const reason of ["TableNeeds", "ReadyToPay", "Question", "AllergyQuestion"])
+      expect(callAsksForUnsentDishes({ reason })).toBe(false);
+    expect(callAsksForUnsentDishes(null)).toBe(false);
   });
 });
