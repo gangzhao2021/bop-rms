@@ -5,6 +5,9 @@ import {
   keepStaffRoundDraft,
   loadStaffRoundDraft,
   STAFF_ROUND_DRAFT_KEEP_MS,
+  staffRoundBackOf,
+  staffRoundIsForParty,
+  startingStaffRound,
 } from "./staff-round-draft.js";
 
 // Batch 65 (v15 b64 live): a table's unsent staff round is kept on this device per Store and
@@ -81,4 +84,55 @@ it("counts a lost note once: not again when it is added back, nor once its line 
     JSON.stringify({ ...draft, lines: [line("b")], noteKeysLeftOut: ["a"] }),
   );
   expect(loadStaffRoundDraft(store, table, 1_000_000)).toBeNull();
+});
+
+// Batch 66 (v15 b65 live, TM2 K65 A): what the language switch kept was not checked against the
+// table's party, and it dropped the brought-back round's notes reminder.
+it("starts from either kept round with its party, day and notes reminder", () => {
+  keepStaffRoundDraft(store, table, { ...draft, noteKeysLeftOut: [] });
+  const onDevice = loadStaffRoundDraft(store, table, 1_000_000);
+  const fromDevice = startingStaffRound(null, onDevice);
+  expect(fromDevice?.party).toEqual({ session: "session-1" });
+  expect(fromDevice?.businessDate).toBe("2026-10-15");
+  expect(fromDevice?.roundBack).toEqual({ noteKeysLeftOut: ["a"] });
+  // The language switch's entry is used first, and carries what it was given.
+  const switched = {
+    lines: [line("a"), line("b")],
+    tip: "0",
+    customTip: "",
+    party: { session: "session-1" },
+    businessDate: "2026-10-15",
+    roundBack: { noteKeysLeftOut: ["a"] },
+  };
+  expect(startingStaffRound(switched, onDevice)).toEqual(switched);
+  // A switch while staff only took the order: nothing was brought back, so no note.
+  const plain = { lines: [line("a")], tip: "0", customTip: "", party: { session: "session-1" } };
+  expect(startingStaffRound(plain, null)).toEqual({
+    ...plain,
+    businessDate: null,
+    roundBack: null,
+  });
+  expect(startingStaffRound(null, null)).toBeNull();
+});
+
+it("holds a kept round only for the party seated at the table now", () => {
+  expect(staffRoundIsForParty({ session: "session-1" }, "session-1")).toBe(true);
+  // Closed and seated again, or closed and free now: another party's round.
+  expect(staffRoundIsForParty({ session: "session-1" }, "session-2")).toBe(false);
+  expect(staffRoundIsForParty({ session: "session-1" }, null)).toBe(false);
+  // Taken while the table was free: still this table's while it is free, not once seated.
+  expect(staffRoundIsForParty({ session: null }, null)).toBe(true);
+  expect(staffRoundIsForParty(null, undefined)).toBe(true);
+  expect(staffRoundIsForParty({ session: null }, "session-2")).toBe(false);
+});
+
+it("reads a switch-kept notes reminder only for lines in the round", () => {
+  const lines = [{ key: "a" }, { key: "b" }];
+  expect(staffRoundBackOf(undefined, lines)).toBeUndefined();
+  expect(staffRoundBackOf(null, lines)).toBeNull();
+  expect(staffRoundBackOf({ noteKeysLeftOut: ["a", "a"] }, lines)).toEqual({
+    noteKeysLeftOut: ["a"],
+  });
+  expect(staffRoundBackOf({ noteKeysLeftOut: ["c"] }, lines)).toBeNull();
+  expect(staffRoundBackOf({ noteKeysLeftOut: "a" }, lines)).toBeNull();
 });

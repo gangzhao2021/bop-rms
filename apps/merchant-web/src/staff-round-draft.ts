@@ -151,3 +151,93 @@ export function clearStaffRoundDraft(storeReference: string, tableReference: str
     // Nothing kept, or it can't be reached: nothing to clear.
   }
 }
+
+/** A brought-back round's lines (by key) still missing the kitchen note they had. */
+export interface StaffRoundBack {
+  readonly noteKeysLeftOut: readonly string[];
+}
+
+/** What the language switch's reload keeps of the round being taken (see i18n keepThrough…). */
+export interface StaffRoundThroughSwitch<L extends StaffRoundDraftLine = StaffRoundDraftLine> {
+  readonly lines: readonly L[];
+  readonly tip: string;
+  readonly customTip: string;
+  readonly party: { readonly session: string | null } | null;
+  /** Batch 66: the business day it was taken on, when the page knew it. */
+  readonly businessDate?: string | null;
+  /** Batch 66: the round was brought back from this device, with the notes still to add again. */
+  readonly roundBack?: StaffRoundBack | null;
+}
+
+/**
+ * Batch 66: a brought-back round as the language switch kept it (undefined: not said, as before
+ * batch 66), checked against the lines it names; anything else is no round brought back.
+ */
+export function staffRoundBackOf(
+  value: unknown,
+  lines: readonly { readonly key: string }[],
+): StaffRoundBack | null | undefined {
+  if (value === undefined) return undefined;
+  const keys = (value as { noteKeysLeftOut?: unknown } | null)?.noteKeysLeftOut;
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    !Array.isArray(keys) ||
+    !keys.every((key) => typeof key === "string" && lines.some((line) => line.key === key))
+  )
+    return null;
+  return { noteKeysLeftOut: [...new Set(keys as string[])] };
+}
+
+/** The round a table's order page starts with, whichever way it was kept (null: an empty one). */
+export interface StartingStaffRound<L extends StaffRoundDraftLine = StaffRoundDraftLine> {
+  readonly lines: readonly L[];
+  readonly tip: string;
+  readonly customTip: string;
+  readonly party: { readonly session: string | null } | null;
+  readonly businessDate: string | null;
+  /** Null: not brought back (the page was only switched to another language). */
+  readonly roundBack: StaffRoundBack | null;
+}
+
+/**
+ * Batch 66 (v15 b65 live, TM2 K65 A): the page starts with what the language switch kept, else the
+ * round kept on this device. Both carry the party and business day they were taken for, so the
+ * page checks either one the same way (`staffRoundIsForParty`, the day read) before staff send it,
+ * and a brought-back round keeps its "add the kitchen note again" reminder through the switch.
+ */
+export function startingStaffRound<L extends StaffRoundDraftLine>(
+  throughSwitch: StaffRoundThroughSwitch<L> | null,
+  onDevice: StaffRoundDraft<L> | null,
+): StartingStaffRound<L> | null {
+  if (throughSwitch !== null)
+    return {
+      lines: throughSwitch.lines,
+      tip: throughSwitch.tip,
+      customTip: throughSwitch.customTip,
+      party: throughSwitch.party,
+      businessDate: throughSwitch.businessDate ?? null,
+      roundBack: throughSwitch.roundBack ?? null,
+    };
+  if (onDevice === null) return null;
+  return {
+    lines: onDevice.lines,
+    tip: onDevice.tip,
+    customTip: onDevice.customTip,
+    party: onDevice.party,
+    businessDate: onDevice.businessDate,
+    roundBack: { noteKeysLeftOut: onDevice.noteKeysLeftOut },
+  };
+}
+
+/**
+ * Batch 65/66: a kept round is this party's only when it was taken for the dining session seated
+ * at the table now (null both: the table was free and still is). Another party's round (the table
+ * was closed and seated again, or is free now) is dropped, on every way the page is opened.
+ */
+export function staffRoundIsForParty(
+  party: { readonly session: string | null } | null,
+  seatedSession: string | null | undefined,
+): boolean {
+  return (party?.session ?? null) === (seatedSession ?? null);
+}

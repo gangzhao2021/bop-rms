@@ -82,6 +82,10 @@ import {
   clearStaffRoundDraft,
   keepStaffRoundDraft,
   loadStaffRoundDraft,
+  staffRoundBackOf,
+  staffRoundIsForParty,
+  startingStaffRound,
+  type StaffRoundBack,
 } from "./staff-round-draft.js";
 
 export { paidAtInstant, payErrorText, paymentUrgentMinutes, paymentWindowNotice };
@@ -917,12 +921,16 @@ export function TableCartOfferActions({
 /**
  * v15 b12: the order being taken, kept across the language switch (the page reloads for it) in
  * this tab only: its dishes, the tip and the party it was taken for. Null when nothing usable.
+ * Batch 66: also the business day it was taken on and, for a round brought back from this device,
+ * the kitchen notes still to add again, so the party, day and reminder hold through the switch.
  */
 interface KeptDraft {
   readonly lines: readonly Line[];
   readonly tip: string;
   readonly customTip: string;
   readonly party: { readonly session: string | null } | null;
+  readonly businessDate?: string | null;
+  readonly roundBack?: StaffRoundBack | null;
 }
 export function keptDraftOf(value: unknown): KeptDraft | null {
   if (value === null || typeof value !== "object") return null;
@@ -953,14 +961,23 @@ export function keptDraftOf(value: unknown): KeptDraft | null {
         (entry.quantity ?? 0) >= 1 &&
         Array.isArray(entry.options)
       );
-    })
+    }) ||
+    !(
+      raw.businessDate === undefined ||
+      raw.businessDate === null ||
+      typeof raw.businessDate === "string"
+    )
   )
     return null;
+  const lines = raw.lines as Line[];
+  const roundBack = staffRoundBackOf(raw.roundBack, lines);
   return {
-    lines: raw.lines as Line[],
+    lines,
     tip: raw.tip,
     customTip: raw.customTip,
     party: party === null ? null : { session: (party?.session as string | null) ?? null },
+    ...(raw.businessDate === undefined ? {} : { businessDate: raw.businessDate }),
+    ...(roundBack === undefined ? {} : { roundBack }),
   };
 }
 
@@ -1033,28 +1050,27 @@ export function StaffOrderEntryPage({
    * Batch 65 (v15 b64 live): a table's round not sent yet, kept on this device, comes back after a
    * reload or signing in again, with a note; it is checked against the table's party and the
    * business day once they are read, and never sent by itself.
+   * Batch 66 (v15 b65 live, TM2 K65 A): what the language switch kept is checked the same way. It
+   * was not, so a table closed and seated again within the switch's minute showed the last
+   * party's dishes to the new party with no note; and the switch dropped the notes reminder.
    */
   const [savedRound] = useState(() =>
-    switchDraft === null && tableMode && tableReference !== null
-      ? loadStaffRoundDraft<Line>(storeReference, tableReference)
-      : null,
+    startingStaffRound(
+      switchDraft,
+      switchDraft === null && tableMode && tableReference !== null
+        ? loadStaffRoundDraft<Line>(storeReference, tableReference)
+        : null,
+    ),
   );
-  const [restoredDraft] = useState(() =>
-    switchDraft !== null || savedRound === null
-      ? switchDraft
-      : {
-          lines: savedRound.lines,
-          tip: savedRound.tip,
-          customTip: savedRound.customTip,
-          party: savedRound.party,
-        },
-  );
+  const restoredDraft = savedRound;
   /** The round brought back, and its lines (by key) still missing the kitchen note they had. */
-  const [roundBack, setRoundBack] = useState<{
-    readonly noteKeysLeftOut: readonly string[];
-  } | null>(() => (savedRound === null ? null : { noteKeysLeftOut: savedRound.noteKeysLeftOut }));
+  const [roundBack, setRoundBack] = useState<StaffRoundBack | null>(
+    () => savedRound?.roundBack ?? null,
+  );
+  const roundBackNow = useRef(roundBack);
+  roundBackNow.current = roundBack;
   /** The kept round still to be checked against the table's party (when the table is read). */
-  const savedRoundCheck = useRef(savedRound);
+  const savedRoundCheck = useRef(tableMode ? savedRound : null);
   const businessDay = useStoreBusinessDay();
   const [lines, setLines] = useState<readonly Line[]>(() => restoredDraft?.lines ?? []);
   /** WP-2423 M165: ticket lines whose price changed on the last menu read (until the next edit). */
@@ -1312,7 +1328,7 @@ export function StaffOrderEntryPage({
         // seated again, or is free now) is not this party's: it is dropped.
         const saved = savedRoundCheck.current;
         savedRoundCheck.current = null;
-        if (saved !== null && (saved.party?.session ?? null) !== (seatedSession ?? null)) {
+        if (saved !== null && !staffRoundIsForParty(saved.party, seatedSession)) {
           setLines([]);
           setTip("0");
           setCustomTip("");
@@ -1345,6 +1361,8 @@ export function StaffOrderEntryPage({
   tipNow.current = { tip, customTip };
   // Batch 65: a round kept from an earlier business day is not brought back.
   const today = businessDay?.businessDate ?? null;
+  const takenOn = useRef<string | null>(null);
+  takenOn.current = today ?? savedRound?.businessDate ?? null;
   // Compared only with the Store's own day read (not the sign-in's date, which may be older).
   const readToday = businessDay?.startsAt == null ? null : today;
   const savedRoundDayChecked = useRef(false);
@@ -1418,6 +1436,9 @@ export function StaffOrderEntryPage({
               tip: tipNow.current.tip,
               customTip: tipNow.current.customTip,
               party: draftParty.current,
+              // Batch 66: checked again after the reload, as a round kept on the device is.
+              businessDate: takenOn.current,
+              roundBack: roundBackNow.current,
             }
           : null,
       ),
@@ -3370,11 +3391,11 @@ export function StaffOrderEntryPage({
                 })}
               </p>
             ) : null}
+            {/* Batch 66: the order number in its one form ("Order 10", "10 号单"), as Kitchen says. */}
+            <p className="counter-order__order-number">
+              {t("Order {orderNumber}", { orderNumber: placed.orderNumber })}
+            </p>
             <dl>
-              <div>
-                <dt>{t("Order")}</dt>
-                <dd>{placed.orderNumber}</dd>
-              </div>
               <div>
                 <dt>{t("Round total incl. tax")}</dt>
                 <dd>
@@ -3460,11 +3481,12 @@ export function StaffOrderEntryPage({
               </p>
             ) : null}
             {tableMode ? (
+              <p className="counter-order__order-number">
+                {t("Order {orderNumber}", { orderNumber: placed.orderNumber })}
+              </p>
+            ) : null}
+            {tableMode ? (
               <dl>
-                <div>
-                  <dt>{t("Order")}</dt>
-                  <dd>{placed.orderNumber}</dd>
-                </div>
                 <div>
                   <dt>{t("Order total incl. tax")}</dt>
                   <dd>{cad(placed.orderMinor)}</dd>
