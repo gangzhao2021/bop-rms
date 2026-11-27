@@ -494,8 +494,8 @@ const openSplitCases = [
         : ["1 of 2 parts paid", "1 of 2 parts paid"],
     note: (zh: boolean) =>
       zh
-        ? "这桌分份付款：2\u00a0份付了 1\u00a0份。在柜台付现金按 5 分取整，刷卡和手机付款不取整。"
-        : "The table is paying the bill in parts: 1 of 2 parts paid. Cash at the counter is rounded to the nearest 5 cents; card and phone payments are not.",
+        ? "这桌分份付款：2\u00a0份付了 1\u00a0份。在柜台付现金按 5\u00a0分取整，刷卡和手机付款不取整。"
+        : "The table is paying the bill in parts: 1 of 2 parts paid. Cash at the counter is rounded to the nearest 5\u00a0cents; card and phone payments are not.",
   },
   {
     scenario: "half-split-paid",
