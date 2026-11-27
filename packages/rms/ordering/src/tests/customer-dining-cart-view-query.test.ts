@@ -184,10 +184,9 @@ describe("safe shared Dining Cart display", () => {
           ? { ...shared(), tableCheckingOut: true as const }
           : shared()) as DiningCartReadResult,
     );
-    const describeMany = vi.fn(async (_requests: readonly unknown[]) => [
-      description(),
-      description(),
-    ]);
+    const describeMany = vi.fn<
+      (requests: readonly unknown[]) => Promise<readonly CatalogSelectionDisplayResult[]>
+    >(async () => [description(), description()]);
     const tablePay = { read: vi.fn(async () => ({})) };
     const rounds = { recent: vi.fn(async () => []) };
     const query = createCustomerDiningCartViewQuery({
