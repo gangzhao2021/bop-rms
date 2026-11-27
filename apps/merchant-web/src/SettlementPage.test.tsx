@@ -56,13 +56,14 @@ describe("WP-2423 P1 settlement report", () => {
         .slice(0, 3)
         .map((match) => match[1]);
     const en = render(settlementViewFixture());
-    expect(labels(en)).toEqual(["Online (guest&#x27;s phone)", "Refunds", "Net taken"]);
+    // Batch 67: the online-only net is "Online net"; "Net taken" is the all-methods figure.
+    expect(labels(en)).toEqual(["Online (guest&#x27;s phone)", "Refunds", "Online net"]);
     expect(en).not.toContain("Paid online");
     expect(en).not.toContain(">Net<");
     setLanguageForTest("zh-Hans");
     try {
       const zh = render(settlementViewFixture());
-      expect(labels(zh)).toEqual(["线上（客人手机）", "退款", "净实收"]);
+      expect(labels(zh)).toEqual(["线上（客人手机）", "退款", "线上净实收"]);
       expect(zh).not.toContain("在线付款");
       expect(zh).not.toContain(">净额<");
     } finally {

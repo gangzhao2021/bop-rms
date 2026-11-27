@@ -6905,6 +6905,12 @@ export const zhHans: Readonly<Record<string, string>> = Object.freeze({
   "Cash given back": "现金退款",
   "Total taken": "合计实收",
   "Net taken": "净实收",
+  "Online net": "线上净实收",
+  "All payment methods": "所有付款方式",
+  "Online, card machine and cash together, minus refunds: the Net taken in Reports.":
+    "线上、刷卡机和现金合计减去退款，即报表里的净实收。",
+  "Not counting {amount} taken back after refunds made by mistake, which is in Card machine net and Net cash.":
+    "不含退款弄错后收回的 {amount}，这笔钱算在刷卡机净实收和现金净实收里。",
   "Card machine: when you close, run its batch (settlement). The batch total should be {amount} (tips included, refunds taken off). If it differs, check each table's card payment.":
     "刷卡机：打烊时做一次批结。批结单总额应是 {amount}（含小费，已减退款）。对不上时逐桌核对刷卡记录。",
   "The cash drawer also holds cash taken on your own register. This figure is only the cash this system recorded (tables and counter orders): count the two apart.":

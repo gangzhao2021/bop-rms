@@ -102,7 +102,8 @@ for (const language of ["en", "zh-Hans"] as const)
       const labels = page.locator(".settlement__totals .overview-count__label");
       await expect(labels.nth(0)).toHaveText(zh ? "线上（客人手机）" : "Online (guest's phone)");
       await expect(labels.nth(1)).toHaveText(zh ? "退款" : "Refunds");
-      await expect(labels.nth(2)).toHaveText(zh ? "净实收" : "Net taken");
+      // Batch 67: the online-only net is "Online net"; "Net taken" is the all-methods figure.
+      await expect(labels.nth(2)).toHaveText(zh ? "线上净实收" : "Online net");
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth),
       ).toBeLessThanOrEqual(0);

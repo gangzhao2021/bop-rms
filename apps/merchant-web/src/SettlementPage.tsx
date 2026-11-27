@@ -1,5 +1,5 @@
 import { countOf, t } from "./i18n/i18n.js";
-import { wordGap } from "./word-gap.js";
+import { sentences, wordGap } from "./word-gap.js";
 import { StatePanel } from "@bop-rms/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
@@ -237,7 +237,8 @@ export function SettlementReport({
           </span>
         </li>
         <li>
-          <span className="overview-count__label">{t("Net taken")}</span>
+          {/* Batch 67: "Net taken" is the all-methods figure below, the one Reports names. */}
+          <span className="overview-count__label">{t("Online net")}</span>
           <strong className="overview-count__value">
             {view.captured && view.refunded
               ? formatSettlementMoney(
@@ -405,6 +406,48 @@ export function SettlementReport({
           </p>
         </section>
       )}
+      {/* Batch 67 (v15 b66 live, TM2 Nov 25): the one Net taken Reports says it matches. */}
+      {(() => {
+        const net = allMethodsNetMinor(view);
+        if (net === undefined) return null;
+        const back =
+          BigInt(view.cardMachine?.takenBack?.amountMinor ?? "0") +
+          BigInt(view.cash?.takenBack?.amountMinor ?? "0");
+        return (
+          <section
+            className="store-card settlement__all-methods"
+            aria-labelledby="settlement-all-methods"
+          >
+            <header>
+              <h3 id="settlement-all-methods">{t("All payment methods")}</h3>
+            </header>
+            <ul
+              className="overview-counts settlement__totals"
+              aria-label={t("All payment methods")}
+            >
+              <li>
+                <span className="overview-count__label">{t("Net taken")}</span>
+                <strong className="overview-count__value">
+                  {net === null ? t("Could not be read") : formatSettlementMoney(net)}
+                </strong>
+              </li>
+            </ul>
+            <p className="bop-muted">
+              {sentences(
+                t(
+                  "Online, card machine and cash together, minus refunds: the Net taken in Reports.",
+                ),
+                net !== null &&
+                  back > 0n &&
+                  t(
+                    "Not counting {amount} taken back after refunds made by mistake, which is in Card machine net and Net cash.",
+                    { amount: formatSettlementMoney(back.toString()) },
+                  ),
+              )}
+            </p>
+          </section>
+        );
+      })()}
       {/* WP-2423 item 8 ① segment 2: comps and discounts, their own line (never hidden). */}
       {view.comps === undefined ? null : view.comps === null ? (
         <p className="bop-muted" role="status">
@@ -939,6 +982,29 @@ type State =
  * WP-2423 M163: what the machine's batch should total: taken less refunded, plus any charge
  * taken back on it after a refund made by mistake.
  */
+/**
+ * Batch 67 (v15 b66 live, TM2 Nov 25: Reports' "Net taken $1,078.73, all payment methods together"
+ * was on Settlement only as $813.41 + $52.52 + $212.80): the day's Net taken over every payment
+ * method, from the figures this page shows — online, card machine and cash taken, less their
+ * refunds — as Reports counts it (money taken back after a refund made by mistake is not in it).
+ * Null when a part could not be read (never a partial sum); undefined from a server that does not
+ * report card-machine and cash payments.
+ */
+export function allMethodsNetMinor(view: SettlementView): string | null | undefined {
+  if (view.cardMachine === undefined || view.cash === undefined) return undefined;
+  if (
+    view.captured === null ||
+    view.refunded === null ||
+    view.cardMachine === null ||
+    view.cash === null
+  )
+    return null;
+  return (
+    BigInt(netMinor(view.captured.amountMinor, view.refunded.amountMinor)) +
+    BigInt(netMinor(view.cardMachine.taken.amountMinor, view.cardMachine.refunded.amountMinor)) +
+    BigInt(netMinor(view.cash.received.amountMinor, view.cash.refunded.amountMinor))
+  ).toString();
+}
 export function cardMachineNetMinor(card: NonNullable<SettlementView["cardMachine"]>): string {
   return (
     BigInt(netMinor(card.taken.amountMinor, card.refunded.amountMinor)) +
