@@ -532,7 +532,9 @@ function parseCounter(value: unknown, sourceChannel: unknown) {
         (typeof c.tenderedMinor !== "string" ||
           !minorPattern.test(c.tenderedMinor) ||
           typeof c.changeMinor !== "string" ||
-          !minorPattern.test(c.changeMinor))) ||
+          !minorPattern.test(c.changeMinor) ||
+          typeof c.roundingMinor !== "string" ||
+          !signedMinorAmount.test(c.roundingMinor))) ||
       typeof p.amountMinor !== "string" ||
       !minorPattern.test(p.amountMinor) ||
       typeof p.refundedMinor !== "string" ||
@@ -554,6 +556,11 @@ function parseCounter(value: unknown, sourceChannel: unknown) {
           : Object.freeze({
               tenderedMinor: c.tenderedMinor as string,
               changeMinor: c.changeMinor as string,
+              /**
+               * b68 (v15 b67 live, TM2 order 8): what rounding the cash to 5 cents moved the order
+               * total by (−2: $3.67 taken as $3.65), so the detail's Total is the cash taken.
+               */
+              roundingMinor: c.roundingMinor as string,
             }),
     });
   }

@@ -517,6 +517,7 @@ export function CurrentOrderLines({
   rounds,
   billRounding,
   tableTaken,
+  counterCashRoundingMinor,
   compRecords,
 }: {
   /**
@@ -571,6 +572,12 @@ export function CurrentOrderLines({
    * orderTableTaken.
    */
   readonly tableTaken?: OrderTableTaken | null | undefined;
+  /**
+   * b68 (v15 b67 live, TM2 order 8): a counter order paid in cash took its Total rounded to 5
+   * cents; that rounding is in the Total, as a table's is, so the Total is the cash taken and a
+   * full cash refund leaves $0.00 after refunds. From orderCounterCashRoundingMinor.
+   */
+  readonly counterCashRoundingMinor?: string | undefined;
 }) {
   const totals = lines.totals;
   const cancelledRefund = cancelledItemsRefund(lines.items);
@@ -624,7 +631,8 @@ export function CurrentOrderLines({
       ? null
       : BigInt(tableTaken.mergedBillRoundsMinor);
   const ownTip = mergedRounds === null ? tableTip : 0n;
-  const ownRounding = mergedRounds === null ? tableRounding : 0n;
+  const ownRounding =
+    (mergedRounds === null ? tableRounding : 0n) + BigInt(counterCashRoundingMinor ?? "0");
   const tip = BigInt(totals.tip?.amountMinor ?? "0") + ownTip;
   const total = Object.freeze({
     amountMinor: (BigInt(orderTotalWithTip(shown).amountMinor) + ownTip + ownRounding).toString(),
@@ -1518,6 +1526,16 @@ export function orderTableTaken(order: {
         mergedBillPaidMinor: bill.paid.amountMinor,
       })
     : taken;
+}
+/**
+ * b68 (v15 b67 live, TM2 order 8: $3.67 taken as $3.65 in cash): what rounding a counter order's
+ * cash payment to 5 cents moved its total by, as Payment recorded it ("0" when paid otherwise or
+ * not yet paid).
+ */
+export function orderCounterCashRoundingMinor(order: {
+  readonly counter: CurrentOrderQueue["items"][number]["counter"];
+}): string {
+  return order.counter?.paidOnCardMachine?.cash?.roundingMinor ?? "0";
 }
 /** orderTableTaken: what the table's payment took, and on a merged table its whole bill. */
 export type OrderTableTaken = TableBillTaken & {
@@ -2711,6 +2729,7 @@ function QueuedOrderLines({
         )}
         billRounding={orderBill(state.detail.order)}
         tableTaken={orderTableTaken(state.detail.order)}
+        counterCashRoundingMinor={orderCounterCashRoundingMinor(state.detail.order)}
         rounds={
           state.detail.order.orderType === "DineIn"
             ? {
@@ -6021,6 +6040,9 @@ export function CurrentOrderQueuePage({
                                 )}
                                 billRounding={orderBill(detail.order)}
                                 tableTaken={orderTableTaken(detail.order)}
+                                counterCashRoundingMinor={orderCounterCashRoundingMinor(
+                                  detail.order,
+                                )}
                                 rounds={
                                   detail.order.orderType === "DineIn"
                                     ? {
