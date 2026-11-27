@@ -349,6 +349,53 @@ for (const language of ["en", "zh-Hans"] as const)
       });
     });
 
+    // Batch 66 (v15 b65 live, S65 A/C): nobody presses Refresh tables. The panel kept "Paid /
+    // Print paid bill" for about 20 s (the floor's own 30 s read); now within one paid-bill read.
+    test(`@production b66: an open checkout panel turns Refunded by itself within seconds of a refund on another screen (${language}, ${width})`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height });
+      await page.clock.install();
+      const state: { refund: Refund } = { refund: null };
+      const floor = await tables(page, language, state);
+      await floor.open();
+      await expect(floor.heading).toHaveText(zh ? "已付款" : "Paid");
+      await expect(floor.panel).toContainText(zh ? "打印已付账单" : "Print paid bill");
+      let billReads = 0,
+        floorReads = 0;
+      page.on("request", (request) => {
+        if (request.url().endsWith("/merchant/dining/table-bill")) billReads += 1;
+        if (request.url().endsWith("/merchant/dining/tables")) floorReads += 1;
+      });
+      // Nothing changed for 9 s: the bill is read once more, the floor not at all.
+      await page.clock.runFor(9_000);
+      await expect.poll(() => billReads).toBe(1);
+      expect(floorReads).toBe(0);
+      await expect(floor.heading).toHaveText(zh ? "已付款" : "Paid");
+      // Refunded in full from Orders on another screen; this screen is not touched.
+      state.refund = { refundedMinor: "1601", refundPendingMinor: "0" };
+      await page.clock.runFor(9_000);
+      await expect(floor.heading).toHaveText(zh ? "已退款" : "Refunded");
+      await expect(
+        floor.panel.getByRole("button", { name: zh ? "打印账单" : "Print bill" }),
+      ).toBeVisible();
+      for (const stale of zh ? ["打印已付账单", "实付合计"] : ["Print paid bill", "Total paid"])
+        await expect(floor.panel).not.toContainText(stale);
+      // The floor is read again once, so the rounds line and the Tables row say the same.
+      await expect(floor.panel.locator(".dining-rounds__table")).toHaveText(
+        zh ? "已全部退款 · 客人走后关台" : "Fully refunded · close when the guests leave",
+      );
+      await expect(floor.row.locator(".table-row__status")).toContainText(
+        zh ? "已全部退款 · 客人走后关台" : "Fully refunded · close when the guests leave",
+      );
+      expect(floorReads).toBe(1);
+      await noSideways(page);
+      await page.screenshot({
+        path: `test-results/b66-tables-refunded-by-itself-${language}-${width}.png`,
+        fullPage: true,
+      });
+    });
+
     test(`@production b65: a part-refunded table is never "paid in full", at its amount after the refund (${language}, ${width})`, async ({
       page,
     }) => {

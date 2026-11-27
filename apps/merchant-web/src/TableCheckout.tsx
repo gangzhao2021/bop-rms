@@ -53,6 +53,20 @@ function outcomeUnknown(error: unknown): boolean {
 export const billReadCeilingMs = 25_000;
 
 /**
+ * Batch 66 (v15 b65 live, TM2 S65 A/C): how often a paid bill open in the Tables panel is read
+ * again by itself. A refund made on another screen showed here only on the floor's own 30 s read
+ * (19.5–20 s in the live check), and staff could print a "paid" bill meanwhile. There is no refund
+ * event for a staff screen, so only this one bill is read sooner — while it is on screen — and the
+ * floor is read again only when its answer changed.
+ */
+export const paidBillRereadMs = 8_000;
+
+/** Batch 66: the same answer read again (the bill's own figures, nothing else). */
+export function sameBill(a: TableBill, b: TableBill): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/**
  * v15 batch 11 review: the longest staff wait for the answer to stopping a phone payment. The stop
  * asks the payment company first (up to about 19 s on a loaded v15 host); a stop still unanswered
  * after this (Wi-Fi dropped mid-request) is given up as not known, and the bill is read again.
@@ -323,6 +337,8 @@ export function TableCheckout({
   const [reload, setReload] = useState(0);
   /** True while a read of the bill is on its way (the periodic re-read waits for it). */
   const billReading = useRef(false);
+  /** Batch 66: the floor was read again because this bill's refunds changed (it is fresh). */
+  const askedFloor = useRef(false);
   const [problem, setProblem] = useState<string | null>(null);
   // merchant-outage-recovery M100: why the bill could not be read again, apart from what an action
   // said. The next read that works clears it.
@@ -402,7 +418,8 @@ export function TableCheckout({
       .bill(csrf, sessionReference, controller.signal)
       .then((value) => {
         if (controller.signal.aborted || stops.current !== stopsBefore) return;
-        setBill(value);
+        // Batch 66: the same answer again changes nothing on screen (no re-render, no floor read).
+        setBill((prior) => (prior !== null && sameBill(prior, value) ? prior : value));
         setReadProblem(null);
       })
       .catch((error: unknown) => {
@@ -450,12 +467,44 @@ export function TableCheckout({
   useEffect(() => {
     if (seenRefresh.current === refreshKey) return;
     seenRefresh.current = refreshKey;
+    // Batch 66: the floor read this panel asked for after the bill changed; the bill is fresh.
+    if (askedFloor.current) {
+      askedFloor.current = false;
+      return;
+    }
     if (session.phase !== "Closing" || !live || billReading.current || stops.current % 2 === 1)
       return;
     // An open bill is already read every 5 s; one read more would only load the server.
     if (bill === null || (!paidNow && bill.writeOff == null)) return;
     setReload((value) => value + 1);
   }, [refreshKey, session.phase, live]);
+  // Batch 66 (v15 b65 live, S65 A/C): a paid bill is read again every few seconds while it is on
+  // screen, so a refund made on another screen turns "Paid / Print paid bill" into what went back
+  // within seconds, not at the floor's next 30 s read.
+  useEffect(() => {
+    if (session.phase !== "Closing" || !live || stoppingPhone || !paidNow) return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "visible" || billReading.current || stops.current % 2 === 1)
+        return;
+      setReload((value) => value + 1);
+    }, paidBillRereadMs);
+    return () => window.clearInterval(timer);
+  }, [session.phase, live, stoppingPhone, paidNow]);
+  // …and when what went back changed, the floor is read again too, so the rounds line, totals and
+  // the Tables row say the same as the heading and the bill.
+  const wentBack =
+    bill === null || !paidNow
+      ? null
+      : (bill.refunds?.givenMinor ?? "0") + "/" + (bill.refunds?.onItsWayMinor ?? "0");
+  const seenWentBack = useRef<string | null>(null);
+  useEffect(() => {
+    const before = seenWentBack.current;
+    seenWentBack.current = wentBack;
+    if (before !== null && wentBack !== null && before !== wentBack) {
+      askedFloor.current = true;
+      onChanged();
+    }
+  }, [wentBack, onChanged]);
   // M100: once the table has paid, a warning left by an earlier lost answer no longer applies.
   useEffect(() => {
     if (paidNow) setProblem(null);
