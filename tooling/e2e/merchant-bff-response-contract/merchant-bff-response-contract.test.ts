@@ -765,6 +765,8 @@ const pickupDetailView = {
         approvedBy: "Store owner",
         at: at(9),
         cashGivenBackMinor: null,
+        // Batch 65: why the money went back, for a counter card-machine or cash refund.
+        reasonCode: "CUSTOMER_REQUEST",
       },
       // v15 b15: a counter cash refund at its request's amount, the drawer's cash beside it.
       {
@@ -774,6 +776,7 @@ const pickupDetailView = {
         approvedBy: null,
         at: at(10),
         cashGivenBackMinor: "510",
+        reasonCode: "CUSTOMER_REQUEST",
       },
     ],
     writeOff: null,
