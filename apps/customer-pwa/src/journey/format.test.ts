@@ -9,6 +9,7 @@ import {
   formatDecimalMoney,
   formatMinutesUntil,
   formatMoney,
+  formatSignedMoney,
   formatRetryClockTime,
   percentOfMinor,
 } from "./format.js";
@@ -103,4 +104,12 @@ describe("tip percentages", () => {
     expect(percentOfMinor("-100", 15)).toBeNull();
     expect(percentOfMinor("1.5", 15)).toBeNull();
   });
+});
+
+// Batch 67 (v15 b65 live): the guest's Cash rounding read "$0.02" where staff read "+$0.02".
+it("signs an amount that moves the bill either way, as staff read it", () => {
+  expect(formatSignedMoney("2", "CAD")).toBe("+$0.02");
+  expect(formatSignedMoney(-3n, "CAD")).toBe("−$0.03");
+  expect(formatSignedMoney("0", "CAD")).toBe("$0.00");
+  expect(formatSignedMoney("x", "CAD")).toBe(formatMoney("x", "CAD"));
 });

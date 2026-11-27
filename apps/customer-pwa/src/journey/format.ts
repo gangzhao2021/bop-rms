@@ -18,6 +18,16 @@ export function formatMoney(amountMinor: string | bigint, currency: string): str
   return currency === "CAD" ? `${sign}$${amount}` : `${sign}${currency} ${amount}`;
 }
 
+/**
+ * "+$0.02" / "−$0.03": an amount that moves the bill either way (cash rounding), signed as staff
+ * read it on the same bill (batch 67, v15 b65 live: the guest read "$0.02", staff "+$0.02").
+ */
+export function formatSignedMoney(amountMinor: string | bigint, currency: string): string {
+  const minor = typeof amountMinor === "bigint" ? amountMinor.toString() : amountMinor;
+  const text = formatMoney(minor, currency);
+  return minorPattern.test(minor) && BigInt(minor) > 0n ? `+${text}` : text;
+}
+
 /** The sign a guest reads beside an amount they type: "$" for CAD, otherwise the ISO code. */
 export function currencySymbol(currency: string): string {
   return currency === "CAD" ? "$" : currency;

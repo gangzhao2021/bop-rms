@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { t, saidTable, nameLocale, useReloadOnLanguageChange } from "../i18n/i18n.js";
-import { formatDateTime, formatLocalityLine, formatMoney } from "../journey/format.js";
+import {
+  formatDateTime,
+  formatLocalityLine,
+  formatMoney,
+  formatSignedMoney,
+} from "../journey/format.js";
 import { MemberJoinPanel } from "../member/MemberJoinPanel.js";
 import { boundedJsonFetch } from "../network/bounded-fetch.js";
 import { getSettledTableReceiptCsrf } from "../session/customer-transaction-context.js";
@@ -487,7 +492,7 @@ export function SettledTableReceiptView({
         {receipt.roundingMinor !== "0" ? (
           <div>
             <dt>{t("Cash rounding")}</dt>
-            <dd>{money(receipt.roundingMinor)}</dd>
+            <dd>{formatSignedMoney(receipt.roundingMinor, "CAD")}</dd>
           </div>
         ) : null}
         {/* Batch 61 (v15 b60 live, CRT60 B): once some of it went back, what was paid, what went

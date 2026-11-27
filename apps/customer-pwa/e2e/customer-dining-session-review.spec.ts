@@ -1470,7 +1470,8 @@ test.describe("@production CUST-DINE-IN-SESSION table view", () => {
     await expect(card).toContainText("Milk tea");
     await expect(card).toContainText("Subtotal before tax$4.50");
     await expect(card).toContainText("Tax$0.59");
-    await expect(card).toContainText("Cash rounding$0.01");
+    // Batch 67: signed as staff read it on the same bill.
+    await expect(card).toContainText("Cash rounding+$0.01");
     await expect(card).toContainText("Total paid$5.10");
     await expect(card).toContainText("Paid byCash");
     expect(receiptReads).toEqual(["e".repeat(43) + ' {"action":"SettledReceipt"}']);

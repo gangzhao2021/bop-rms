@@ -179,7 +179,7 @@ it("batch 57 (v15 b56 live): Your table says parts paid one way in Chinese, as t
   expect(zhHans["{paid} of {count} parts paid · {amount} to go"]).toBe(`${round} · 还差 {amount}`);
   expect(
     zhHans[
-      "The table is paying the bill in parts: {paid} of {count} parts paid. Cash at the counter is rounded to the nearest 5 cents; card and phone payments are not."
+      "The table is paying the bill in parts: {paid} of {count} parts paid. Cash at the counter is rounded to the nearest 5\u00a0cents; card and phone payments are not."
     ],
   ).toContain(round);
   // Never the fraction, nor "已付 N 份", for an even split's progress.
@@ -409,5 +409,17 @@ it("says the points offer and its after-refund note one way in Chinese", () => {
     }
     if (english.endsWith("(after the refund)")) expect(chinese).toMatch(/（已扣除退款部分）$/u);
     else expect(chinese).not.toContain("退款");
+  }
+});
+
+// Batch 67 (v15 b65 live): on the zh 390 table total the cash note broke "…现金按 5 | 分取整…".
+it("batch 67: the cash rounding note keeps 5 and its unit together in both languages", () => {
+  const notes = Object.entries(zhHans).filter(([english]) =>
+    /rounded to the nearest/u.test(english),
+  );
+  expect(notes).toHaveLength(3);
+  for (const [english, chinese] of notes) {
+    expect(english).toContain("nearest 5\u00a0cents");
+    expect(chinese).toContain("现金按 5\u00a0分取整");
   }
 });

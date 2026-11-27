@@ -6,7 +6,7 @@ import { v7 as uuidv7 } from "uuid";
 import { saidTable, t, wordGap, listSeparator } from "../i18n/i18n.js";
 import { parseTipAmount } from "../checkout/tip-amount.js";
 import { customTipCheck } from "../checkout/checkout-decisions.js";
-import { formatMoney } from "../journey/format.js";
+import { formatMoney, formatSignedMoney } from "../journey/format.js";
 import { SlowWaitNote } from "../journey/SlowWaitNote.js";
 import { paymentConfiguration } from "../payment/payment-configuration.js";
 import { cardFormNotLoadedText, StripeCardForm } from "../payment/StripeCardForm.js";
@@ -626,7 +626,7 @@ export function TablePayPanel({
           {receipt.roundingMinor !== "0" ? (
             <div>
               <dt>{t("Cash rounding")}</dt>
-              <dd>{money(receipt.roundingMinor)}</dd>
+              <dd>{formatSignedMoney(receipt.roundingMinor, "CAD")}</dd>
             </div>
           ) : null}
           {/* Batch 61 (v15 b60 live): once some of it went back, what was paid, what went back and

@@ -24,7 +24,12 @@ import {
 } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { CustomerPage, PageHeading, type CustomerStoreContext } from "../journey/CustomerPage.js";
-import { formatClockTime, formatMoney, keepTimeTogether } from "../journey/format.js";
+import {
+  formatClockTime,
+  formatMoney,
+  formatSignedMoney,
+  keepTimeTogether,
+} from "../journey/format.js";
 import { staffCancellationReasonText } from "../order-status/OrderStatusPage.js";
 import { orderStatusText } from "../journey/messages.js";
 import {
@@ -189,6 +194,9 @@ const settled: ReadonlySet<DiningRoundStatus> = new Set([
 ]);
 
 const money = (value: DiningMoney) => formatMoney(value.amountMinor, value.currencyCode);
+/** Batch 67: cash rounding as staff read it on the same bill ("+$0.02" / "−$0.03"). */
+const signedMoney = (value: DiningMoney) =>
+  formatSignedMoney(value.amountMinor, value.currencyCode);
 /** Discounts and fees the items carried (total − subtotal − tax), or null when there are none. */
 function adjustments(total: DiningMoney, subtotal: DiningMoney, tax: DiningMoney): string | null {
   const rest = BigInt(total.amountMinor) - BigInt(subtotal.amountMinor) - BigInt(tax.amountMinor);
@@ -895,7 +903,7 @@ export function TableSummary({
             <dl className="order-status__money">
               <div>
                 <dt>{t("Cash rounding")}</dt>
-                <dd>{money(summary.cashRounding)}</dd>
+                <dd>{signedMoney(summary.cashRounding)}</dd>
               </div>
             </dl>
           ) : null}
@@ -952,7 +960,7 @@ export function TableSummary({
           {summary.cashRounding !== undefined && nonZero(summary.cashRounding) ? (
             <div>
               <dt>{t("Cash rounding")}</dt>
-              <dd>{money(summary.cashRounding)}</dd>
+              <dd>{signedMoney(summary.cashRounding)}</dd>
             </div>
           ) : null}
         </dl>
@@ -1046,12 +1054,12 @@ export function TableSummary({
                   })
               : payLater && summary.splitParts !== undefined && summary.splitParts.count === null
                 ? t(
-                    "The table is paying by dish; {paid} paid so far. Cash at the counter is rounded to the nearest 5 cents; card and phone payments are not.",
+                    "The table is paying by dish; {paid} paid so far. Cash at the counter is rounded to the nearest 5\u00a0cents; card and phone payments are not.",
                     { paid: String(summary.splitParts.paid) },
                   )
                 : payLater && summary.splitParts !== undefined
                   ? t(
-                      "The table is paying the bill in parts: {paid} of {count} parts paid. Cash at the counter is rounded to the nearest 5 cents; card and phone payments are not.",
+                      "The table is paying the bill in parts: {paid} of {count} parts paid. Cash at the counter is rounded to the nearest 5\u00a0cents; card and phone payments are not.",
                       {
                         count: String(summary.splitParts.count),
                         paid: String(summary.splitParts.paid - refundedParts),
@@ -1081,7 +1089,9 @@ export function TableSummary({
         summary.cashRounding !== undefined &&
         nonZero(summary.cashRounding)
           ? wordGap() +
-            t("Cash is rounded to the nearest 5 cents; card and phone payments are not rounded.")
+            t(
+              "Cash is rounded to the nearest 5\u00a0cents; card and phone payments are not rounded.",
+            )
           : null}
         {/* Batch 59 (v15 b58 live): parts staff gave back in full, said once, never whose. */}
         {!closedByStaff && refundedParts > 0
