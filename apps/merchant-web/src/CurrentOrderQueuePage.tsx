@@ -76,7 +76,7 @@ import { useRememberedAlertSound } from "./alert-sound.js";
 import { serviceOperationReference } from "./service-control-client.js";
 import { StatePanel } from "@bop-rms/ui";
 import { playKitchenChime } from "./alert-chime.js";
-import { orderWhen, storeTime } from "./StoreTime.js";
+import { orderWhen, storeTime, unbrokenWhen } from "./StoreTime.js";
 export { orderWhen };
 import { compedText, compRecordLabel, partCompedText } from "./ItemCompAction.js";
 import {
@@ -89,6 +89,7 @@ import { businessDateLabel, openedEarlierText, useStoreBusinessDay } from "./Sto
 import { WorkspacePage } from "./WorkspacePage.js";
 import {
   earlierDayUnfinished,
+  stillOpenOnTheFloor,
   earlierDayWaiting,
   type OrdersBusinessDay,
 } from "./orders-earlier-days.js";
@@ -171,7 +172,8 @@ interface CurrentOrderFilters {
   readonly phase: string;
   /**
    * Owner 2026-10-25: "Today" shows the Store's current business day, plus earlier orders that
-   * still need staff (held stock, a round to accept); omitted or "All": every loaded day.
+   * still need staff (held stock, a round to accept; since batch 67 a table still open or a
+   * payment still awaited); omitted or "All": every loaded day.
    */
   readonly day?: "Today" | "All";
   readonly today?: string | null;
@@ -190,7 +192,8 @@ export function filterCurrentOrderItems(
         order.listedBusinessDate === filters.today ||
         order.heldStock !== null ||
         order.earlierOpenPickup ||
-        isAwaitingAcceptance(order)) &&
+        isAwaitingAcceptance(order) ||
+        stillOpenOnTheFloor(order)) &&
       (filters.type === "All" || order.orderType === filters.type) &&
       (filters.channel === "All" || orderChannel(order) === filters.channel) &&
       (filters.phase === "All" ||
@@ -1277,7 +1280,8 @@ export function refundedByWay(
   return [...refunds]
     .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0))
     .map((refund) => {
-      const time = when(refund.at);
+      // Batch 67 (v15 b65 live, zh 390): "11月27日周五" and "01:32" never part across lines.
+      const time = unbrokenWhen(when(refund.at));
       const reason = reasonOf(refund);
       return {
         label:
@@ -3093,9 +3097,9 @@ export function mergedIntoText(into: {
 export function orderRowNoteShownEverywhere(order: QueuedOrder): boolean {
   const paid = order.tableBill?.paid ?? null;
   // Batch 65: all of it going back (some still on its way) says its next step at every width too.
-  return (
-    paid !== null && (tablePaidFullyRefunded(paid) || tablePaidRefundState(paid) === "AllOnItsWay")
-  );
+  // Batch 67 (v15 b65 live): so does part of it going back ("Part refunded at the table · guest's
+  // phone"), on phones and beside an open order, wherever the fully refunded note shows.
+  return paid !== null && (tablePaidFullyRefunded(paid) || tablePaidRefundState(paid) !== "None");
 }
 
 /**

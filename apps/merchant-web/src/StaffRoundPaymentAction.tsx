@@ -182,7 +182,9 @@ export function StaffRoundPaymentAction({
             if (amount === null) readAmount();
           }}
         >
-          {amount === null
+          {/* Batch 67 (v15 b65 live): the counter row's title names its amount, so its button
+              reads "Take payment" on every row, before and after its form was opened. */}
+          {amount === null || counterStyle
             ? (label ?? t("Record card-machine payment"))
             : `${label ?? t("Record card-machine payment")} · ${cad(amount)}`}
         </button>

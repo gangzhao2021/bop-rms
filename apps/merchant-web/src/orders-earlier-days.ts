@@ -37,3 +37,18 @@ export function earlierDayUnfinished(
 ): boolean {
   return order.heldStock !== null || order.earlierOpenPickup || earlierDayWaiting(order, day);
 }
+/**
+ * Batch 67 (v15 b66 live, TM2 R66 A/B/C): tables seated at 03:58 and paid at 04:01, still seated
+ * after the 04:00 business-day start, had their orders hidden under Orders > Today, so staff needed
+ * Filter > All days to refund them. An order still needs the floor while its table is open (owed,
+ * or paid and still checking out) or while its payment is still awaited: the default list keeps it,
+ * under its own day's heading and "11/26 · 24", until its table closes. A table merged into another
+ * (listed on that one) or one written off as left without paying is no longer open here.
+ */
+export function stillOpenOnTheFloor(order: CurrentOrderQueue["items"][number]): boolean {
+  if (order.awaitingPayment) return true;
+  const bill = order.tableBill;
+  if (bill == null || bill.mergedInto !== undefined || bill.writtenOffMinor !== undefined)
+    return false;
+  return bill.paid === null ? BigInt(bill.totalMinor) > 0n : bill.checkingOut === true;
+}

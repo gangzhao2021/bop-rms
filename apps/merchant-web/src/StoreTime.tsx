@@ -335,3 +335,13 @@ export function orderWhen(instant: string, timeZone: string | undefined, today: 
   }).format(new Date(instant));
   return `${label} ${time}`;
 }
+/**
+ * Batch 67 (v15 b65 live, zh 390): a date and time said at the end of a line ("11月27日周五 01:32",
+ * "Fri, Nov 27 01:32") wrap as one piece: no-break spaces, and a word joiner beside each Chinese
+ * character, where a line may otherwise break. It reads and is read aloud as before.
+ */
+export function unbrokenWhen(text: string): string {
+  return text
+    .replace(/ /gu, "\u00a0")
+    .replace(/(?<=\p{Script=Han})(?=\S)|(?<=\S)(?=\p{Script=Han})/gu, "\u2060");
+}

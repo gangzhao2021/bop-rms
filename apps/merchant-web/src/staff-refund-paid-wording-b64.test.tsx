@@ -180,7 +180,8 @@ describe("b64: the Orders row of a table bill refunded in full", () => {
     expect(orderAmountNote(order({ refundedMinor: "500" }, true))).toBe(
       "Part refunded at the table · guest's phone",
     );
-    expect(orderRowNoteShownEverywhere(order({ refundedMinor: "500" }, true))).toBe(false);
+    // Batch 67 (v15 b65 live) changed this: a part refund's note shows at every width too.
+    expect(orderRowNoteShownEverywhere(order({ refundedMinor: "500" }, true))).toBe(true);
     const onItsWay = order({ refundedMinor: "3200", refundPendingMinor: "300" }, true);
     expect(orderAmountNote(onItsWay)).toBe("Being refunded · close when the guests leave");
     expect(orderRowNoteShownEverywhere(onItsWay)).toBe(true);
