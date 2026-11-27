@@ -834,6 +834,11 @@ fieldset.store-features__modules {
   border-bottom: 1px solid var(--bop-color-border-default);
   text-align: left;
 }
+/* Batch 67 (v15 b65 live, DEMO at 1024/1440): the Store names took the muted column-header
+   grey; they are the row's words, dark at every width, as on a phone and on Orders. */
+.brand-stores__table th[scope="row"] {
+  color: var(--bop-color-text-default);
+}
 .brand-stores__note {
   display: block;
   color: var(--bop-color-text-muted);
